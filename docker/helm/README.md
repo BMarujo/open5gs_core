@@ -29,3 +29,11 @@ N3 and return routing. Legacy OR/location and fallback are unchanged.
 Packaging is adapted to the runtime contract of Gradiant 5g-charts; their original
 multi-stage image recipe is at
 https://github.com/Gradiant/5g-images/blob/0e5a69cf83c120ce817a7ded5fa8d35b46cbeab6/images/open5gs/Dockerfile.
+
+Validated public build (2026-11-04):
+`docker.io/bmarujo/open5gs:dnn-055eb4a770d0`, pinned registry digest
+`sha256:1e125d1f016fa9f3df6354588ebdaee2e281c637157f923003cf0570546d37fa`.
+Anonymous manifest access and actual Kubernetes imageIDs were verified.
+Gradiant umbrella chart 2.3.4 required no template modifications. See
+[the cluster report](../../docs/design/dynamic-dnn-cluster.md) for exact scope,
+first-request evidence, mixed-version SBI refresh and the unavailable edge worker.

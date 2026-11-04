@@ -5,9 +5,11 @@ stage 4A: 2026-10-11; stage 5: 2026-10-11–12.
 Feature regression and asymmetric recovery corrections: 2026-11-04.
 Status: stages 2, 3 and 4A implemented and validated for the documented scope.
 Advertisement, owned learning and legacy selection integration are implemented.
-Stage 5 local integration and image preparation are delivered with explicit
-recovery and baseline error FAILs. Strict selection (4B) and cluster execution
-(stage 6) have not started.
+Stage 5 local integration and image preparation were delivered with explicit
+recovery and baseline error FAILs. Strict selection (4B) has not started.
+Stage 6 was subsequently authorized on 2026-11-04: public Helm-compatible image
+and live validation on available workers passed, with an existing unavailable
+edge worker remaining blocked. See the [cluster report](dynamic-dnn-cluster.md).
 The introduced late-Heartbeat invalidation regression was subsequently fixed;
 see [correction and new evidence](dynamic-dnn-restart-fix.md). Historical stage
 results below retain their original scope and dates.

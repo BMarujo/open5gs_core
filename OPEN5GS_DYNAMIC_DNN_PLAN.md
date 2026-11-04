@@ -27,6 +27,7 @@ Documentação em inglês:
 - [Runbook: reprodução local, fixtures isoladas para cluster e rollback](docs/design/dynamic-dnn-runbook.md).
 - [Correção de 4 de novembro: mappings após restart/Heartbeat e novas evidências](docs/design/dynamic-dnn-restart-fix.md).
 - [Recuperação após perda assimétrica de Heartbeats e ownership de eventos](docs/design/dynamic-dnn-pfcp-recovery.md).
+- [Etapa 6: imagem pública, Helm e validação real no cluster](docs/design/dynamic-dnn-cluster.md).
 
 A regeneração da etapa 1 com caches existentes e vazios passou, reproduzindo o codec original (incluindo os bugs). A caracterização de duas funções extraídas do seletor passou em 8 asserts. O modelo de identidade passou entre processos novos; o teste de reinício real da UPF fica para a etapa 3. Nessa auditoria, a baseline completa Meson ficou bloqueada por `talloc` ausente; esse impedimento foi superado no ambiente isolado da etapa 2. Estes resultados da etapa 1 não validavam uma feature implementada.
 
@@ -227,6 +228,34 @@ NOT RUN: 4B (optional), cluster, outros vendors, NAS completo nas imagens e
 retenção seletiva. Evidência: `/home/marujo/open5gs_pfcp_recovery_results_20261104`;
 imagens locais `2c80f8f2ba9d-dirty-0d6a194893d6`. Ver ADR Decisão 7 e relatório
 para os limites e resultados reais. Sem deployments, publicação, push ou PR.
+
+### Etapa 6 autorizada — publicação e validação Kubernetes, 4 de novembro de 2026
+
+O utilizador autorizou explicitamente commit/push do core, publicação no Docker Hub
+público e atualização das SMF/UPFs existentes. Código publicado em `main`; imagem
+única `bmarujo/open5gs:dnn-055eb4a770d0`, compilada com todos os executáveis e
+bibliotecas, compatível com o chart Gradiant **2.3.4** já instalado. Digest fixado
+nos valores Helm de sete releases/oito Deployments; não se alterou o chart nem
+as imagens das restantes NFs.
+
+PASS: build completo/quatro suites, publicação pública e digest/imageIDs reais;
+12 sessões positivas nos cenários dinâmicos mais uma após restaurar a configuração
+normal, sempre com primeiro pedido N4 correto e sem retransmissões. IE 233 de B/C
+confirmado por TShark 4.2.2, identidade de C persistente, rotação C/B/C/B e
+perda/regresso automático sem reiniciar a SMF durante esses testes. Sessões em A/B
+mantiveram dados. Caso sem DNN compatível manteve fallback legacy e rejeição NAS.
+
+Falhas intermédias documentadas: libtins em falta na primeira imagem (corrigido
+antes da publicação), encaminhamento SBI para a SMF antiga/pool de clientes SCP
+esgotado (renovados SCP/AMF mantendo imagens), captura sem privilégios (corrigido
+no harness). Recursos/pools temporários e 16 subscribers sintéticos foram limpos;
+a configuração final normal voltou a passar NAS/N4/dados.
+
+NOT RUN ambiental: SMF/UPFs edge-1 no worker já NotReady; templates foram atualizados,
+mas não se mudou placement nem se forçou a limpeza dos Pods antigos. As quatro
+workloads disponíveis SMF/UPF ficaram Ready. 4B continua NOT RUN (optional).
+Relatório inglês e evidência em `open5gs_cluster_results_20261104T154429Z`.
+Etapa 7, publicação de PR e reparação do worker não foram iniciadas.
 
 ## 1. Resultado pretendido
 

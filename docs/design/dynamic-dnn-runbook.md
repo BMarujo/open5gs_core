@@ -9,6 +9,11 @@ commands are preparation only: Kubernetes admission, networking and UE sessions
 have **NOT RUN**. Executing stage 6 requires a new explicit instruction and an
 identified test context and dedicated namespace. Stage 4B is excluded.
 
+A subsequent explicit instruction authorized public image publication and updates
+to existing SMF/UPF releases. That completed live campaign and its environment
+limitations are recorded in the [cluster report](dynamic-dnn-cluster.md). Its
+Helm-compatible image differs from the earlier minimal images reproduced below.
+
 ## Inputs and local reproduction
 
 Use Linux/amd64 with Docker, `/dev/net/tun`, NET_ADMIN permission, Python 3.12+
@@ -16,7 +21,7 @@ on the host and enough space for the source, full build and evidence. Never use
 host networking or an existing MongoDB. The runner creates its own network
 namespace and tmpfs MongoDB, and removes only its recorded container IDs.
 
-The current evidence bundle is `/home/marujo/open5gs_pfcp_recovery_results_20261104`.
+The recovery evidence bundle is `/home/marujo/open5gs_pfcp_recovery_results_20261104`.
 The prior `/home/marujo/open5gs_dnn_restart_results_20261104` and original
 `/home/marujo/open5gs_stage5_results_20261011` remain unchanged;
 their older images/source do not contain the latest asymmetric recovery correction.
