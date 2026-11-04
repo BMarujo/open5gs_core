@@ -121,14 +121,14 @@ void sgwu_pfcp_state_will_associate(ogs_fsm_t *s, sgwu_event_t *e)
                     &message->pfcp_heartbeat_response));
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE:
-            ogs_pfcp_up_handle_association_setup_request(node, xact,
-                    &message->pfcp_association_setup_request);
-            OGS_FSM_TRAN(s, sgwu_pfcp_state_associated);
+            if (ogs_pfcp_up_handle_association_setup_request(node, xact,
+                    &message->pfcp_association_setup_request, false))
+                OGS_FSM_TRAN(s, sgwu_pfcp_state_associated);
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE:
-            ogs_pfcp_up_handle_association_setup_response(node, xact,
-                    &message->pfcp_association_setup_response);
-            OGS_FSM_TRAN(s, sgwu_pfcp_state_associated);
+            if (ogs_pfcp_up_handle_association_setup_response(node, xact,
+                    &message->pfcp_association_setup_response))
+                OGS_FSM_TRAN(s, sgwu_pfcp_state_associated);
             break;
         default:
             ogs_warn("cannot handle PFCP message type[%d]",
@@ -176,6 +176,7 @@ void sgwu_pfcp_state_associated(ogs_fsm_t *s, sgwu_event_t *e)
     case OGS_FSM_EXIT_SIG:
         ogs_info("PFCP de-associated %s",
                 ogs_sockaddr_to_string_static(node->addr_list));
+        ogs_pfcp_pool_snapshot_clear(node);
         ogs_timer_stop(node->t_no_heartbeat);
         break;
     case SGWU_EVT_SXA_MESSAGE:
@@ -263,14 +264,16 @@ void sgwu_pfcp_state_associated(ogs_fsm_t *s, sgwu_event_t *e)
         case OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE:
             ogs_warn("PFCP[REQ] has already been associated %s",
                 ogs_sockaddr_to_string_static(node->addr_list));
-            ogs_pfcp_up_handle_association_setup_request(node, xact,
-                    &message->pfcp_association_setup_request);
+            if (!ogs_pfcp_up_handle_association_setup_request(node, xact,
+                    &message->pfcp_association_setup_request, true))
+                ogs_warn("PFCP replacement failed; current live association retained");
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE:
             ogs_warn("PFCP[RSP] has already been associated %s",
                 ogs_sockaddr_to_string_static(node->addr_list));
-            ogs_pfcp_up_handle_association_setup_response(node, xact,
-                    &message->pfcp_association_setup_response);
+            if (!ogs_pfcp_up_handle_association_setup_response(node, xact,
+                    &message->pfcp_association_setup_response))
+                ogs_warn("PFCP replacement failed; current live association retained");
             break;
         case OGS_PFCP_SESSION_ESTABLISHMENT_REQUEST_TYPE:
             sess = sgwu_sess_add_by_message(message);

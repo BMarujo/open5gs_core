@@ -19,6 +19,10 @@ smf:
       scp:
         - uri: http://127.0.0.200:7777
   pfcp:
+    # Opt-in owned PFCP pool/DNN metadata; default false.
+    # Learned DNNs feed the legacy DNN OR location match; fallback remains.
+    # Accepted absence uses static DNNs; invalidated/unusable data does not.
+#    learn_upf_dnn: true
     server:
       - address: 127.0.0.4
     client:

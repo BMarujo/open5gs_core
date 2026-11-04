@@ -204,6 +204,8 @@ static int ogs_pfcp_context_validation(const char *local)
         ogs_error("No %s.pfcp.address: in '%s'", local, ogs_app()->file);
         return OGS_ERROR;
     }
+    if (ogs_pfcp_validate_pool_config() != OGS_OK)
+        return OGS_ERROR;
     if (ogs_pfcp_check_subnet_overlapping() != OGS_OK)
         return OGS_ERROR;
 
@@ -240,7 +242,20 @@ int ogs_pfcp_context_parse_config(const char *local, const char *remote)
                     while (ogs_yaml_iter_next(&pfcp_iter)) {
                         const char *pfcp_key = ogs_yaml_iter_key(&pfcp_iter);
                         ogs_assert(pfcp_key);
-                        if (!strcmp(pfcp_key, "server")) {
+                        if ((!strcmp(local, "upf") &&
+                                !strcmp(pfcp_key, "advertise_ue_ip_pools")) ||
+                            (!strcmp(local, "smf") &&
+                                !strcmp(pfcp_key, "learn_upf_dnn"))) {
+                            const char *v = ogs_yaml_iter_value(&pfcp_iter);
+                            bool enabled;
+                            if (!v || (strcmp(v, "true") && strcmp(v, "false"))) {
+                                ogs_error("%s.pfcp.%s must be true or false", local, pfcp_key);
+                                return OGS_ERROR;
+                            }
+                            enabled = !strcmp(v, "true");
+                            if (!strcmp(local, "upf")) self.advertise_ue_ip_pools = enabled;
+                            else self.learn_upf_dnn = enabled;
+                        } else if (!strcmp(pfcp_key, "server")) {
                             ogs_yaml_iter_t server_iter, server_array;
                             ogs_yaml_iter_recurse(&pfcp_iter, &server_array);
                             do {
@@ -760,6 +775,7 @@ int ogs_pfcp_context_parse_config(const char *local, const char *remote)
                         const char *gateway = NULL;
                         const char *mask_or_numbits = NULL;
                         const char *dnn = NULL;
+                        const char *pool_id = NULL;
                         const char *dev = self.tun_ifname;
                         const char *low[OGS_MAX_NUM_OF_SUBNET_RANGE];
                         const char *high[OGS_MAX_NUM_OF_SUBNET_RANGE];
@@ -801,6 +817,8 @@ int ogs_pfcp_context_parse_config(const char *local, const char *remote)
                             } else if (!strcmp(subnet_key, "apn") ||
                                         !strcmp(subnet_key, "dnn")) {
                                 dnn = ogs_yaml_iter_value(&subnet_iter);
+                            } else if (!strcmp(subnet_key, "pool_id") && !strcmp(local, "upf")) {
+                                pool_id = ogs_yaml_iter_value(&subnet_iter);
                             } else if (!strcmp(subnet_key, "dev")) {
                                 dev = ogs_yaml_iter_value(&subnet_iter);
                             } else if (!strcmp(subnet_key, "range")) {
@@ -841,10 +859,21 @@ int ogs_pfcp_context_parse_config(const char *local, const char *remote)
                                 ogs_warn("unknown key `%s`", subnet_key);
                         }
 
+                        if (ogs_list_count(&self.subnet_list) >= OGS_MAX_NUM_OF_SUBNET) {
+                            ogs_error("Too many configured PFCP session subnets (maximum %d)",
+                                    OGS_MAX_NUM_OF_SUBNET);
+                            return OGS_ERROR;
+                        }
                         subnet = ogs_pfcp_subnet_add(
                                 ipstr, mask_or_numbits, gateway, dnn, dev);
                         ogs_assert(subnet);
 
+                        if (pool_id) {
+                            subnet->pool_announcement_invalid = strlen(pool_id) > OGS_PFCP_MAX_POOL_ID_LEN;
+                            ogs_cpystrn(subnet->pool_id, pool_id, sizeof(subnet->pool_id));
+                        }
+                        if (dnn && strlen(dnn) >= OGS_MAX_DNN_LEN)
+                            subnet->pool_announcement_invalid = true;
                         subnet->num_of_range = num;
                         for (i = 0; i < subnet->num_of_range; i++) {
                             subnet->range[i].low = low[i];
@@ -912,6 +941,7 @@ void ogs_pfcp_node_free(ogs_pfcp_node_t *node)
 {
     ogs_assert(node);
 
+    ogs_pfcp_pool_snapshot_clear(node);
     ogs_pfcp_xact_delete_all(node);
 
     ogs_freeaddrinfo(node->config_addr);

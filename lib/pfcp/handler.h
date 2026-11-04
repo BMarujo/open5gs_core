@@ -33,14 +33,16 @@ bool ogs_pfcp_handle_heartbeat_response(
 
 bool ogs_pfcp_cp_handle_association_setup_request(
         ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
-        ogs_pfcp_association_setup_request_t *req);
+        ogs_pfcp_association_setup_request_t *req,
+        const ogs_pfcp_pool_decode_result_t *pool_result);
 bool ogs_pfcp_cp_handle_association_setup_response(
         ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
-        ogs_pfcp_association_setup_response_t *req);
+        ogs_pfcp_association_setup_response_t *req,
+        const ogs_pfcp_pool_decode_result_t *pool_result);
 
 bool ogs_pfcp_up_handle_association_setup_request(
         ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
-        ogs_pfcp_association_setup_request_t *req);
+        ogs_pfcp_association_setup_request_t *req, bool already_associated);
 bool ogs_pfcp_up_handle_association_setup_response(
         ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
         ogs_pfcp_association_setup_response_t *req);

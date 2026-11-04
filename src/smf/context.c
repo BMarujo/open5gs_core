@@ -1385,7 +1385,69 @@ smf_ue_t *smf_ue_find_by_imsi(uint8_t *imsi, int imsi_len)
     return (smf_ue_t *)ogs_hash_get(self.imsi_hash, imsi, imsi_len);
 }
 
-static bool compare_ue_info(ogs_pfcp_node_t *node, smf_sess_t *sess)
+static const char *upf_dnn_source(const ogs_pfcp_node_t *node)
+{
+    if (!ogs_pfcp_self()->learn_upf_dnn || (node->learned_pools &&
+                node->learned_pools->result.status == OGS_PFCP_POOL_ABSENT))
+        return "static";
+    /* Invalidation is not an accepted advertisement absence. */
+    return node->learned_pools ? "learned" : "learned-unavailable";
+}
+
+static bool compare_upf_dnn(ogs_pfcp_node_t *node, smf_sess_t *sess)
+{
+    const ogs_pfcp_pool_snapshot_t *snapshot = node->learned_pools;
+    uint8_t required, available = 0;
+    unsigned i;
+    bool static_match = false, learned_match = false;
+
+    for (i = 0; i < node->num_of_dnn; i++)
+        if (ogs_strcasecmp(node->dnn[i], sess->session.name) == 0) {
+            static_match = true;
+            break;
+        }
+    if (!ogs_pfcp_self()->learn_upf_dnn || (snapshot &&
+                snapshot->result.status == OGS_PFCP_POOL_ABSENT))
+        return static_match;
+    if (!snapshot) return false;
+
+    /* Use the effective session type at selection, including allocator
+     * downgrades. This is a DNN comparison, not a global eligibility filter. */
+    switch (sess->session.session_type) {
+    case OGS_PDU_SESSION_TYPE_IPV4: required = OGS_PFCP_POOL_IP_V4; break;
+    case OGS_PDU_SESSION_TYPE_IPV6: required = OGS_PFCP_POOL_IP_V6; break;
+    case OGS_PDU_SESSION_TYPE_IPV4V6:
+        required = OGS_PFCP_POOL_IP_V4 | OGS_PFCP_POOL_IP_V6; break;
+    default: required = 0; break;
+    }
+    if (required && (snapshot->result.status == OGS_PFCP_POOL_VALID ||
+                    snapshot->result.status == OGS_PFCP_POOL_DEGRADED)) {
+        for (i = 0; i < snapshot->num_groups; i++) {
+            const ogs_pfcp_learned_pool_t *pool = &snapshot->groups[i];
+            if (!pool->usable || pool->num_slices ||
+                    ogs_strcasecmp(pool->dnn, sess->session.name)) continue;
+            /* Missing IP Version is unknown, with static-like matching;
+             * it is not evidence that the UPF supports both families. */
+            if (!pool->family_present) {
+                learned_match = true;
+                break;
+            }
+            available |= pool->family;
+        }
+        if ((available & required) == required) learned_match = true;
+    }
+    if (static_match != learned_match)
+        ogs_debug("UPF DNN precedence DNN[%s] peer[%s] source[learned] "
+                "static-match[%d] effective-match[%d] status[%d] generation[%llu]",
+                sess->session.name,
+                ogs_sockaddr_to_string_static(node->addr_list),
+                static_match, learned_match, snapshot->result.status,
+                (unsigned long long)snapshot->generation);
+    return learned_match;
+}
+
+static bool compare_ue_info(ogs_pfcp_node_t *node, smf_sess_t *sess,
+        const char **reason)
 {
     int i;
 
@@ -1393,26 +1455,37 @@ static bool compare_ue_info(ogs_pfcp_node_t *node, smf_sess_t *sess)
     ogs_assert(sess);
     ogs_assert(sess->session.name);
 
-    for (i = 0; i < node->num_of_dnn; i++)
-        if (ogs_strcasecmp(node->dnn[i], sess->session.name) == 0) return true;
+    if (compare_upf_dnn(node, sess)) {
+        *reason = "dnn";
+        return true;
+    }
 
     for (i = 0; i < node->num_of_e_cell_id; i++)
         if (sess->gtp_rat_type == OGS_GTP2_RAT_TYPE_EUTRAN &&
-                node->e_cell_id[i] == sess->e_cgi.cell_id) return true;
+                node->e_cell_id[i] == sess->e_cgi.cell_id) {
+            *reason = "e-cell-id";
+            return true;
+        }
 
     for (i = 0; i < node->num_of_nr_cell_id; i++)
-        if (node->nr_cell_id[i] == sess->nr_cgi.cell_id) return true;
+        if (node->nr_cell_id[i] == sess->nr_cgi.cell_id) {
+            *reason = "nr-cell-id";
+            return true;
+        }
 
     for (i = 0; i < node->num_of_tac; i++)
         if ((sess->gtp_rat_type == OGS_GTP2_RAT_TYPE_EUTRAN &&
                 node->tac[i] == sess->e_tai.tac) ||
-            (node->tac[i] == sess->nr_tai.tac.v)) return true;
+            (node->tac[i] == sess->nr_tai.tac.v)) {
+            *reason = "tac";
+            return true;
+        }
 
     return false;
 }
 
 static ogs_pfcp_node_t *selected_upf_node(
-        ogs_pfcp_node_t *current, smf_sess_t *sess)
+        ogs_pfcp_node_t *current, smf_sess_t *sess, const char **reason)
 {
     ogs_pfcp_node_t *next, *node;
 
@@ -1423,16 +1496,17 @@ static ogs_pfcp_node_t *selected_upf_node(
     next = ogs_list_next(current);
     for (node = next; node; node = ogs_list_next(node)) {
         if (OGS_FSM_CHECK(&node->sm, smf_pfcp_state_associated) &&
-            compare_ue_info(node, sess) == true) return node;
+            compare_ue_info(node, sess, reason) == true) return node;
     }
     /* cyclic search from top to current position */
     for (node = ogs_list_first(&ogs_pfcp_self()->pfcp_peer_list);
             node != next; node = ogs_list_next(node)) {
         if (OGS_FSM_CHECK(&node->sm, smf_pfcp_state_associated) &&
-            compare_ue_info(node, sess) == true) return node;
+            compare_ue_info(node, sess, reason) == true) return node;
     }
 
     if (ogs_global_conf()->parameter.no_pfcp_rr_select == 0) {
+        *reason = "rr-fallback";
         /* continue search from current position */
         next = ogs_list_next(current);
         for (node = next; node; node = ogs_list_next(node)) {
@@ -1448,11 +1522,13 @@ static ogs_pfcp_node_t *selected_upf_node(
     }
 
     ogs_error("No UPFs are PFCP associated that are suited to RR");
+    *reason = "first-peer-fallback";
     return ogs_list_first(&ogs_pfcp_self()->pfcp_peer_list);
 }
 
 void smf_sess_select_upf(smf_sess_t *sess)
 {
+    const char *reason = NULL;
     ogs_assert(sess);
 
     /*
@@ -1466,10 +1542,14 @@ void smf_sess_select_upf(smf_sess_t *sess)
     if (ogs_pfcp_self()->pfcp_node) {
         /* setup GTP session with selected UPF */
         ogs_pfcp_self()->pfcp_node =
-            selected_upf_node(ogs_pfcp_self()->pfcp_node, sess);
+            selected_upf_node(ogs_pfcp_self()->pfcp_node, sess, &reason);
         ogs_assert(ogs_pfcp_self()->pfcp_node);
         OGS_SETUP_PFCP_NODE(sess, ogs_pfcp_self()->pfcp_node);
-        ogs_debug("UE using UPF on IP %s",
+        ogs_info("UPF selected DNN[%s] source[%s] reason[%s] "
+                "associated[%d] generation[%llu] peer[%s]",
+                sess->session.name, upf_dnn_source(sess->pfcp_node), reason,
+                OGS_FSM_CHECK(&sess->pfcp_node->sm, smf_pfcp_state_associated),
+                (unsigned long long)sess->pfcp_node->association_generation,
                 ogs_sockaddr_to_string_static(
                     ogs_pfcp_self()->pfcp_node->addr_list));
     } else {

@@ -10,6 +10,9 @@ global:
 
 upf:
   pfcp:
+    # Opt-in pool/DNN advertisement in Association Setup; default false.
+    # Requires an explicit, persistent, unique pool_id on each session with DNN.
+#    advertise_ue_ip_pools: true
     server:
       - address: 127.0.0.7
     client:
@@ -76,13 +79,17 @@ upf:
 #    - subnet: 10.45.0.0/16
 #      gateway: 10.45.0.1
 #      dnn: internet
+#      pool_id: internet-v4-a  # Preserve across restarts; 1-64 ASCII [A-Za-z0-9._:-]
 #    - subnet: 2001:db8:cafe::/48
 #      dnn: internet
+#      pool_id: internet-v6-a  # Must differ from the IPv4 entry
 #      dev: ogstun2
 #    - subnet: 10.46.0.0/16
 #      gateway: 10.46.0.1
 #      dnn: ims
+#      pool_id: ims-v4-a
 #      dev: ogstun3
 #    - subnet: 2001:db8:babe::/48
 #      dnn: ims
+#      pool_id: ims-v6-a
 #      dev: ogstun3

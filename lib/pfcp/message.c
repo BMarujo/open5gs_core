@@ -20,8 +20,8 @@
 /*******************************************************************************
  * This file had been created by pfcp-tlv.py script v0.1.0
  * Please do not modify this file but regenerate it via script.
- * Created on: 2026-06-16 15:45:22.429710 by acetcom
- * from r19.5.0/29244-j50.docx
+ * Created on: 2026-10-07 17:05:00.966226 by marujo
+ * from lib/pfcp/support/r19.5.0/29244-j50.docx
  ******************************************************************************/
 
 #include "ogs-pfcp.h"
@@ -3450,7 +3450,8 @@ ogs_tlv_desc_t ogs_pfcp_tlv_desc_create_pdr =
         &ogs_pfcp_tlv_desc_mar_id,
         &ogs_pfcp_tlv_desc_packet_replication_and_detection_carry_on_information,
         &ogs_pfcp_tlv_desc_ip_multicast_addressing_info_within_pfcp_session_establishment_request,
-        &ogs_pfcp_tlv_desc_ue_ip_address,
+        &ogs_pfcp_tlv_desc_ue_ip_address_pool_identity,
+        &ogs_pfcp_tlv_desc_ue_ip_address_pool_identity,
         &ogs_pfcp_tlv_desc_multipath_applicable_indication,
         &ogs_pfcp_tlv_desc_transport_delay_reporting,
         &ogs_pfcp_tlv_desc_rat_type,
@@ -4776,9 +4777,11 @@ ogs_tlv_desc_t ogs_pfcp_tlv_desc_ue_ip_address_pool_information =
     0,
     sizeof(ogs_pfcp_tlv_ue_ip_address_pool_information_t),
     {
-        &ogs_pfcp_tlv_desc_ue_ip_address,
+        &ogs_pfcp_tlv_desc_ue_ip_address_pool_identity,
+        &ogs_tlv_desc_more16,
         &ogs_pfcp_tlv_desc_network_instance,
         &ogs_pfcp_tlv_desc_s_nssai,
+        &ogs_tlv_desc_more8,
         &ogs_pfcp_tlv_desc_ip_version,
         NULL,
     }
@@ -4945,7 +4948,7 @@ ogs_tlv_desc_t ogs_pfcp_tlv_desc_ue_ip_address_usage_information =
         &ogs_pfcp_tlv_desc_validity_timer,
         &ogs_pfcp_tlv_desc_number_of_ue_ip_addresses,
         &ogs_pfcp_tlv_desc_network_instance,
-        &ogs_pfcp_tlv_desc_ue_ip_address,
+        &ogs_pfcp_tlv_desc_ue_ip_address_pool_identity,
         &ogs_pfcp_tlv_desc_s_nssai,
         NULL,
     }
@@ -5260,7 +5263,8 @@ ogs_tlv_desc_t ogs_pfcp_msg_desc_pfcp_association_setup_request =
         &ogs_pfcp_tlv_desc_alternative_smf_ip_address,
         &ogs_pfcp_tlv_desc_smf_set_id,
         &ogs_pfcp_tlv_desc_pfcp_session_retention_information_within_pfcp_association_setup_request,
-        &ogs_pfcp_tlv_desc_ue_ip_address,
+        &ogs_pfcp_tlv_desc_ue_ip_address_pool_information,
+        &ogs_tlv_desc_more16,
         &ogs_pfcp_tlv_desc_gtp_u_path_qos_control_information,
         &ogs_pfcp_tlv_desc_clock_drift_control_information,
         &ogs_pfcp_tlv_desc_nf_instance_id,
@@ -5286,7 +5290,8 @@ ogs_tlv_desc_t ogs_pfcp_msg_desc_pfcp_association_setup_response =
         &ogs_pfcp_tlv_desc_smf_set_id,
         &ogs_pfcp_tlv_desc_pfcpasrsp_flags,
         &ogs_pfcp_tlv_desc_clock_drift_control_information,
-        &ogs_pfcp_tlv_desc_ue_ip_address,
+        &ogs_pfcp_tlv_desc_ue_ip_address_pool_information,
+        &ogs_tlv_desc_more16,
         &ogs_pfcp_tlv_desc_gtp_u_path_qos_control_information,
         &ogs_pfcp_tlv_desc_nf_instance_id,
         &ogs_pfcp_tlv_desc_n6_delay_measurement_control_information,
@@ -5310,7 +5315,8 @@ ogs_tlv_desc_t ogs_pfcp_msg_desc_pfcp_association_update_request =
         &ogs_pfcp_tlv_desc_alternative_smf_ip_address,
         &ogs_pfcp_tlv_desc_smf_set_id,
         &ogs_pfcp_tlv_desc_clock_drift_control_information,
-        &ogs_pfcp_tlv_desc_ue_ip_address,
+        &ogs_pfcp_tlv_desc_ue_ip_address_pool_information,
+        &ogs_tlv_desc_more16,
         &ogs_pfcp_tlv_desc_gtp_u_path_qos_control_information,
         &ogs_pfcp_tlv_desc_ue_ip_address_usage_information,
         &ogs_pfcp_tlv_desc_n6_delay_measurement_control_information,
@@ -5697,7 +5703,8 @@ ogs_pfcp_message_t *ogs_pfcp_parse_msg(ogs_pkbuf_t *pkbuf)
     ogs_pfcp_message_t *pfcp_message = NULL;
 
     ogs_assert(pkbuf);
-    ogs_assert(pkbuf->len);
+    if (pkbuf->len < OGS_PFCP_HEADER_LEN-OGS_PFCP_SEID_LEN)
+        return NULL;
 
     h = (ogs_pfcp_header_t *)pkbuf->data;
     ogs_assert(h);
@@ -5712,6 +5719,11 @@ ogs_pfcp_message_t *ogs_pfcp_parse_msg(ogs_pkbuf_t *pkbuf)
         size = OGS_PFCP_HEADER_LEN;
     else
         size = OGS_PFCP_HEADER_LEN-OGS_PFCP_SEID_LEN;
+
+    if (pkbuf->len < size || pkbuf->len != 4 + be16toh(h->length)) {
+        ogs_pfcp_message_free(pfcp_message);
+        return NULL;
+    }
 
     if (ogs_pkbuf_pull(pkbuf, size) == NULL) {
         ogs_error("ogs_pkbuf_pull() failed [len:%d]", pkbuf->len);
@@ -5752,18 +5764,24 @@ ogs_pfcp_message_t *ogs_pfcp_parse_msg(ogs_pkbuf_t *pkbuf)
             ogs_expect(rv == OGS_OK);
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE:
-            rv = ogs_tlv_parse_msg(&pfcp_message->pfcp_association_setup_request,
-                    &ogs_pfcp_msg_desc_pfcp_association_setup_request, pkbuf, OGS_TLV_MODE_T2_L2);
+            rv = ogs_pfcp_parse_pool_tlvs(&pfcp_message->pfcp_association_setup_request,
+                    &ogs_pfcp_msg_desc_pfcp_association_setup_request, pkbuf,
+                    &pfcp_message->pool_information,
+                    &pfcp_message->pool_decode_storage);
             ogs_expect(rv == OGS_OK);
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE:
-            rv = ogs_tlv_parse_msg(&pfcp_message->pfcp_association_setup_response,
-                    &ogs_pfcp_msg_desc_pfcp_association_setup_response, pkbuf, OGS_TLV_MODE_T2_L2);
+            rv = ogs_pfcp_parse_pool_tlvs(&pfcp_message->pfcp_association_setup_response,
+                    &ogs_pfcp_msg_desc_pfcp_association_setup_response, pkbuf,
+                    &pfcp_message->pool_information,
+                    &pfcp_message->pool_decode_storage);
             ogs_expect(rv == OGS_OK);
             break;
         case OGS_PFCP_ASSOCIATION_UPDATE_REQUEST_TYPE:
-            rv = ogs_tlv_parse_msg(&pfcp_message->pfcp_association_update_request,
-                    &ogs_pfcp_msg_desc_pfcp_association_update_request, pkbuf, OGS_TLV_MODE_T2_L2);
+            rv = ogs_pfcp_parse_pool_tlvs(&pfcp_message->pfcp_association_update_request,
+                    &ogs_pfcp_msg_desc_pfcp_association_update_request, pkbuf,
+                    &pfcp_message->pool_information,
+                    &pfcp_message->pool_decode_storage);
             ogs_expect(rv == OGS_OK);
             break;
         case OGS_PFCP_ASSOCIATION_UPDATE_RESPONSE_TYPE:
@@ -5866,6 +5884,8 @@ ogs_pfcp_message_t *ogs_pfcp_parse_msg(ogs_pkbuf_t *pkbuf)
 void ogs_pfcp_message_free(ogs_pfcp_message_t *pfcp_message)
 {
     ogs_assert(pfcp_message);
+    if (pfcp_message->pool_decode_storage)
+        ogs_pkbuf_free(pfcp_message->pool_decode_storage);
     ogs_free(pfcp_message);
 }
 

@@ -75,6 +75,8 @@ int ogs_pfcp_up_send_association_setup_request(ogs_pfcp_node_t *node,
         void (*cb)(ogs_pfcp_xact_t *xact, void *data));
 int ogs_pfcp_up_send_association_setup_response(ogs_pfcp_xact_t *xact,
         uint8_t cause);
+int ogs_pfcp_up_send_association_setup_response_with_retention(
+        ogs_pfcp_xact_t *xact, uint8_t cause, bool sessions_retained);
 
 void ogs_pfcp_send_gtpu(ogs_pfcp_pdr_t *pdr, ogs_pkbuf_t *sendbuf);
 void ogs_pfcp_send_buffered_gtpu(ogs_pfcp_pdr_t *pdr);

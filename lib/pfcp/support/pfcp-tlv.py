@@ -264,7 +264,7 @@ def get_presence_and_comment(cells):
     comment = re.sub(r'\n|\"|\'|\\\\', '', comment)
     return presence, comment
 
-def get_cells(cells):
+def get_cells(cells, parent=""):
     cells = compact_row_cells(cells)
     note = cells[0].text
     if note.find('NOTE') != -1:
@@ -303,7 +303,7 @@ def get_cells(cells):
 
     if ie_type.find('PFD Contents') != -1:
         ie_type = 'PFD contents'
-    elif ie_type.find('UE IP address') != -1:
+    elif ie_type == 'UE IP address':
         ie_type = 'UE IP Address'
     elif ie_type.find('SxSMReq-Flags') != -1:
         ie_type = 'PFCPSMReq-Flags'
@@ -365,7 +365,20 @@ def get_cells(cells):
     if ie_value[len(ie_value)-1] == ' ':
         ie_value = ie_value[:len(ie_value)-1]
 
-    tlv_more = "0"  # PFCP has no tlv_more
+    tlv_more = "0"  # Local storage capacity minus one, not a wire instance.
+    parent_name = canonical_ie_name(parent)
+    if ie_type == 'UE IP address Pool Information' and parent_name in (
+            'pfcpassociationsetuprequest', 'pfcpassociationsetupresponse',
+            'pfcpassociationupdaterequest'):
+        tlv_more = "15"
+    if parent_name == 'ueipaddresspoolinformation':
+        if ie_type == 'UE IP address Pool Identity':
+            tlv_more = "15"
+        elif ie_type == 'S-NSSAI':
+            tlv_more = "7"
+    # Create PDR has a specified IPv4-then-IPv6 pair, not an arbitrary list.
+    if parent_name == 'createpdr' and ie_type == 'UE IP address Pool Identity':
+        tlv_more = "1"
     if ie_type == 'Create PDR' or ie_type == 'Created PDR' or ie_type == 'Update PDR' or ie_type == "Remove PDR":
         tlv_more = "15"
     if ie_type == 'Create FAR' or ie_type == 'Update FAR' or ie_type == "Remove FAR":
@@ -588,7 +601,7 @@ else:
                     ies = []
                     write_file(f, "ies = []\n")
                     for row in table.rows[4:]:
-                        cells = get_cells(row.cells)
+                        cells = get_cells(row.cells, ie_name)
                         if cells is None:
                             continue
 
@@ -662,7 +675,7 @@ for key in msg_list.keys():
             write_file(f, "ies = []\n")
             if key != "PFCP Session Deletion Request" and key != "PFCP Version Not Supported Response":
                 for row in table.rows[start_i:]:
-                    cells = get_cells(row.cells)
+                    cells = get_cells(row.cells, key)
                     if cells is None:
                         continue
 
@@ -913,6 +926,8 @@ for (k, v) in sorted_msg_list:
 
 f.write("typedef struct ogs_pfcp_message_s {\n")
 f.write("   ogs_pfcp_header_t h;\n")
+f.write("   ogs_pfcp_pool_decode_result_t pool_information;\n")
+f.write("   ogs_pkbuf_t *pool_decode_storage; /* owned filtered association body */\n")
 f.write("   union {\n")
 for (k, v) in sorted_msg_list:
     if "ies" in msg_list[k]:
@@ -980,7 +995,12 @@ for (k, v) in sorted_group_list:
     for ies in group_list[k]["ies"]:
         f.write("        &ogs_pfcp_tlv_desc_%s,\n" % v_lower(ies["ie_type"]))
         if type_list[ies["ie_type"]]["max_tlv_more"] != "0" and ies["tlv_more"] != "0":
-            f.write("        &ogs_tlv_desc_more" + str(int(ies["tlv_more"])+1) + ",\n")
+            if k == 'Create PDR' and ies["ie_type"] == 'UE IP address Pool Identity':
+                # A protocol-specified pair: the parser ignores subsequent IEs.
+                # MORE is for local capacities and logs an overflow on excess.
+                f.write("        &ogs_pfcp_tlv_desc_ue_ip_address_pool_identity,\n")
+            else:
+                f.write("        &ogs_tlv_desc_more" + str(int(ies["tlv_more"])+1) + ",\n")
     f.write("        NULL,\n")
     f.write("    }\n")
     f.write("};\n\n")
@@ -1009,7 +1029,8 @@ f.write("""ogs_pfcp_message_t *ogs_pfcp_parse_msg(ogs_pkbuf_t *pkbuf)
     ogs_pfcp_message_t *pfcp_message = NULL;
 
     ogs_assert(pkbuf);
-    ogs_assert(pkbuf->len);
+    if (pkbuf->len < OGS_PFCP_HEADER_LEN-OGS_PFCP_SEID_LEN)
+        return NULL;
 
     h = (ogs_pfcp_header_t *)pkbuf->data;
     ogs_assert(h);
@@ -1024,6 +1045,11 @@ f.write("""ogs_pfcp_message_t *ogs_pfcp_parse_msg(ogs_pkbuf_t *pkbuf)
         size = OGS_PFCP_HEADER_LEN;
     else
         size = OGS_PFCP_HEADER_LEN-OGS_PFCP_SEID_LEN;
+
+    if (pkbuf->len < size || pkbuf->len != 4 + be16toh(h->length)) {
+        ogs_pfcp_message_free(pfcp_message);
+        return NULL;
+    }
 
     if (ogs_pkbuf_pull(pkbuf, size) == NULL) {
         ogs_error("ogs_pkbuf_pull() failed [len:%d]", pkbuf->len);
@@ -1048,8 +1074,15 @@ for (k, v) in sorted_msg_list:
     if "ies" in msg_list[k]:
         f.write("        case OGS_%s_TYPE:\n" % v_upper(k))
         if k != "PFCP Session Deletion Request" and k != "PFCP Version Not Supported Response":
-            f.write("            rv = ogs_tlv_parse_msg(&pfcp_message->%s,\n" % v_lower(k))
-            f.write("                    &ogs_pfcp_msg_desc_%s, pkbuf, OGS_TLV_MODE_T2_L2);\n" % v_lower(k))
+            if k in ("PFCP Association Setup Request", "PFCP Association Setup Response",
+                     "PFCP Association Update Request"):
+                f.write("            rv = ogs_pfcp_parse_pool_tlvs(&pfcp_message->%s,\n" % v_lower(k))
+                f.write("                    &ogs_pfcp_msg_desc_%s, pkbuf,\n" % v_lower(k))
+                f.write("                    &pfcp_message->pool_information,\n")
+                f.write("                    &pfcp_message->pool_decode_storage);\n")
+            else:
+                f.write("            rv = ogs_tlv_parse_msg(&pfcp_message->%s,\n" % v_lower(k))
+                f.write("                    &ogs_pfcp_msg_desc_%s, pkbuf, OGS_TLV_MODE_T2_L2);\n" % v_lower(k))
             f.write("            ogs_expect(rv == OGS_OK);\n")
         f.write("            break;\n")
 f.write("""        default:
@@ -1068,6 +1101,8 @@ f.write("""        default:
 void ogs_pfcp_message_free(ogs_pfcp_message_t *pfcp_message)
 {
     ogs_assert(pfcp_message);
+    if (pfcp_message->pool_decode_storage)
+        ogs_pkbuf_free(pfcp_message->pool_decode_storage);
     ogs_free(pfcp_message);
 }
 

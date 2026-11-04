@@ -63,6 +63,10 @@ typedef struct ogs_pfcp_context_s {
     ogs_pfcp_up_function_features_t up_function_features;
     int up_function_features_len;
 
+    /* Explicit opt-ins, set only for the corresponding NF role. */
+    bool advertise_ue_ip_pools;
+    bool learn_upf_dnn;
+
     ogs_list_t      pfcp_peer_list; /* PFCP Node List */
     ogs_pfcp_node_t *pfcp_node;     /* Iterator for Peer round-robin */
 
@@ -117,9 +121,13 @@ typedef struct ogs_pfcp_node_s {
 
     uint32_t        remote_recovery; /* UTC time */
     bool            restoration_required;
+    bool            retain_sessions_on_setup; /* CP reconnect, not restart detection */
 
     ogs_pfcp_up_function_features_t up_function_features;
     int up_function_features_len;
+    uint64_t association_generation;
+    uint64_t association_epoch; /* Changes on publication AND invalidation. */
+    struct ogs_pfcp_pool_snapshot_s *learned_pools;
 } ogs_pfcp_node_t;
 
 typedef enum {
@@ -383,6 +391,9 @@ typedef struct ogs_pfcp_subnet_s {
     ogs_ipsubnet_t  sub;                    /* Subnet : 2001:db8:cafe::0/48 */
     ogs_ipsubnet_t  gw;                     /* Gateway : 2001:db8:cafe::1 */
     char            dnn[OGS_MAX_DNN_LEN+1]; /* DNN : "internet", "volte", .. */
+    /* Owned configuration identity; never derive it from process state. */
+    char pool_id[OGS_PFCP_MAX_POOL_ID_LEN+1];
+    bool pool_announcement_invalid;
 
 #define OGS_MAX_NUM_OF_SUBNET_RANGE 16
     struct {

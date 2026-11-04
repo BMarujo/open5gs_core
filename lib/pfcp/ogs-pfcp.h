@@ -34,6 +34,7 @@
 
 #define OGS_PFCP_INSIDE
 
+#include "pfcp/pool-codec.h"
 #include "pfcp/message.h"
 #include "pfcp/types.h"
 #include "pfcp/conv.h"
@@ -44,6 +45,7 @@
 #include "pfcp/xact.h"
 #include "pfcp/handler.h"
 #include "pfcp/util.h"
+#include "pfcp/association.h"
 
 #ifdef __cplusplus
 extern "C" {

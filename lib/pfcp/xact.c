@@ -235,6 +235,9 @@ int ogs_pfcp_xact_update_tx(ogs_pfcp_xact_t *xact,
             ogs_sockaddr_to_string_static(xact->node->addr_list));
 
     stage = ogs_pfcp_xact_get_stage(hdesc->type, xact->xid);
+    if (hdesc->type == OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE ||
+            hdesc->type == OGS_PFCP_HEARTBEAT_REQUEST_TYPE)
+        xact->association_epoch = xact->node->association_epoch;
     if (xact->org == OGS_PFCP_LOCAL_ORIGINATOR) {
         switch (stage) {
         case PFCP_XACT_INITIAL_STAGE:
@@ -590,7 +593,16 @@ int ogs_pfcp_xact_commit(ogs_pfcp_xact_t *xact)
     pkbuf = xact->seq[xact->step-1].pkbuf;
     ogs_assert(pkbuf);
 
-    ogs_expect(OGS_OK == ogs_pfcp_sendto(xact->node, pkbuf));
+    if (ogs_pfcp_sendto(xact->node, pkbuf) != OGS_OK) {
+        /* A failed Setup response must not be cached as Accepted: a retry
+         * must reach the handler again before a snapshot may be published. */
+        if (type == OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE ||
+                type == OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE) {
+            ogs_pfcp_xact_delete(xact);
+            return OGS_ERROR;
+        }
+        ogs_error("PFCP transaction send failed");
+    }
 
     return OGS_OK;
 }
@@ -763,6 +775,11 @@ int ogs_pfcp_xact_receive(
         }
     }
 
+    if (new && type == OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE &&
+            (new->step != 1 || new->seq[0].type != OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE))
+        return OGS_ERROR;
+    if (!new && type == OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE)
+        return OGS_ERROR;
     if (!new) {
         ogs_debug("[%d] Cannot find new type %u from PFCP peer %s",
                 xid, type, ogs_sockaddr_to_string_static(node->addr_list));

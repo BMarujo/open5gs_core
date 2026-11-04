@@ -33,6 +33,7 @@ bool ogs_pfcp_handle_heartbeat_request(
         return false;
     }
 
+    ogs_pfcp_pool_snapshot_heartbeat(node, req->recovery_time_stamp.u32, false);
     if (node->remote_recovery == 0 ||
         node->remote_recovery == req->recovery_time_stamp.u32) {
     } else if (node->remote_recovery < req->recovery_time_stamp.u32) {
@@ -59,17 +60,23 @@ bool ogs_pfcp_handle_heartbeat_response(
         ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
         ogs_pfcp_heartbeat_response_t *rsp)
 {
+    bool current_probe_response;
     ogs_assert(node);
     ogs_assert(xact);
     ogs_assert(rsp);
 
-    ogs_pfcp_xact_commit(xact);
+    /* Commit can free xact. Capture the probe's association epoch first. */
+    current_probe_response = xact->association_epoch == node->association_epoch;
+    if (ogs_pfcp_xact_commit(xact) != OGS_OK)
+        current_probe_response = false;
 
     if (rsp->recovery_time_stamp.presence == 0) {
         ogs_error("No Recovery Time Stamp");
         return false;
     }
 
+    ogs_pfcp_pool_snapshot_heartbeat(node, rsp->recovery_time_stamp.u32,
+            current_probe_response);
     if (node->remote_recovery == 0 ||
         node->remote_recovery == rsp->recovery_time_stamp.u32) {
     } else if (node->remote_recovery < rsp->recovery_time_stamp.u32) {
@@ -89,74 +96,99 @@ bool ogs_pfcp_handle_heartbeat_response(
     return true;
 }
 
-bool ogs_pfcp_cp_handle_association_setup_request(
-        ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
-        ogs_pfcp_association_setup_request_t *req)
+static void store_up_features(ogs_pfcp_node_t *node, const ogs_tlv_octet_t *features)
 {
-    ogs_assert(xact);
-    ogs_assert(node);
-    ogs_assert(req);
-
-    ogs_pfcp_cp_send_association_setup_response(
-            xact, OGS_PFCP_CAUSE_REQUEST_ACCEPTED);
-
-    if (req->up_function_features.presence) {
-        if (req->up_function_features.data && req->up_function_features.len) {
-            node->up_function_features_len =
-                ogs_min(req->up_function_features.len,
-                        sizeof(node->up_function_features));
-            memcpy(&node->up_function_features, req->up_function_features.data,
-                    node->up_function_features_len);
-        }
+    memset(&node->up_function_features, 0, sizeof(node->up_function_features));
+    node->up_function_features_len = 0;
+    if (features->presence && features->data && features->len) {
+        node->up_function_features_len = ogs_min(features->len,
+                sizeof(node->up_function_features));
+        memcpy(&node->up_function_features, features->data,
+                node->up_function_features_len);
     }
-
-    if (node->up_function_features.ftup == 0)
+    if (!node->up_function_features.ftup)
         ogs_warn("F-TEID allocation/release not supported with peer %s",
                 ogs_sockaddr_to_string_static(node->addr_list));
+}
 
+bool ogs_pfcp_cp_handle_association_setup_request(
+        ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
+        ogs_pfcp_association_setup_request_t *req,
+        const ogs_pfcp_pool_decode_result_t *pool_result)
+{
+    ogs_pfcp_pool_snapshot_t *candidate = NULL;
+    uint8_t cause = ogs_pfcp_validate_setup(&req->node_id,
+            &req->recovery_time_stamp, NULL);
+    if (cause != OGS_PFCP_CAUSE_REQUEST_ACCEPTED) {
+        ogs_pfcp_cp_send_association_setup_response(xact, cause);
+        return false;
+    }
+    if (ogs_pfcp_self()->learn_upf_dnn) {
+        candidate = ogs_pfcp_pool_snapshot_prepare(
+                req->ue_ip_address_pool_information, pool_result,
+                OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE);
+        if (!candidate) {
+            ogs_pfcp_cp_send_association_setup_response(xact,
+                    OGS_PFCP_CAUSE_NO_RESOURCES_AVAILABLE);
+            return false;
+        }
+    }
+    if (ogs_pfcp_cp_send_association_setup_response(xact,
+                OGS_PFCP_CAUSE_REQUEST_ACCEPTED) != OGS_OK) {
+        if (candidate) ogs_free(candidate);
+        return false;
+    }
+    store_up_features(node, &req->up_function_features);
+    ogs_pfcp_pool_snapshot_publish(node, candidate);
     return true;
 }
 
 bool ogs_pfcp_cp_handle_association_setup_response(
         ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
-        ogs_pfcp_association_setup_response_t *rsp)
+        ogs_pfcp_association_setup_response_t *rsp,
+        const ogs_pfcp_pool_decode_result_t *pool_result)
 {
-    ogs_assert(xact);
-    ogs_pfcp_xact_commit(xact);
-
-    ogs_assert(node);
-    ogs_assert(rsp);
-
-    if (rsp->up_function_features.presence) {
-        if (rsp->up_function_features.data && rsp->up_function_features.len) {
-            node->up_function_features_len =
-                ogs_min(rsp->up_function_features.len,
-                        sizeof(node->up_function_features));
-            memcpy(&node->up_function_features, rsp->up_function_features.data,
-                    node->up_function_features_len);
+    ogs_pfcp_pool_snapshot_t *candidate = NULL;
+    if (xact->association_epoch != node->association_epoch ||
+            ogs_pfcp_validate_setup(&rsp->node_id, &rsp->recovery_time_stamp,
+                &rsp->cause) != OGS_PFCP_CAUSE_REQUEST_ACCEPTED ||
+            rsp->cause.u8 != OGS_PFCP_CAUSE_REQUEST_ACCEPTED) {
+        ogs_pfcp_setup_response_error(xact);
+        return false;
+    }
+    if (ogs_pfcp_self()->learn_upf_dnn) {
+        candidate = ogs_pfcp_pool_snapshot_prepare(
+                rsp->ue_ip_address_pool_information, pool_result,
+                OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE);
+        if (!candidate) {
+            ogs_pfcp_setup_response_error(xact);
+            return false;
         }
     }
-
-    if (node->up_function_features.ftup == 0)
-        ogs_warn("F-TEID allocation/release not supported with peer %s",
-                ogs_sockaddr_to_string_static(node->addr_list));
-
+    if (ogs_pfcp_xact_commit(xact) != OGS_OK) {
+        if (candidate) ogs_free(candidate);
+        return false;
+    }
+    store_up_features(node, &rsp->up_function_features);
+    ogs_pfcp_pool_snapshot_publish(node, candidate);
     return true;
 }
 
 bool ogs_pfcp_up_handle_association_setup_request(
         ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
-        ogs_pfcp_association_setup_request_t *req)
+        ogs_pfcp_association_setup_request_t *req, bool already_associated)
 {
-    ogs_assert(xact);
-    ogs_pfcp_up_send_association_setup_response(
-            xact, OGS_PFCP_CAUSE_REQUEST_ACCEPTED);
-
-    if (req->cp_function_features.presence) {
-        ogs_pfcp_self()->cp_function_features.octet5 =
-            req->cp_function_features.u8;
-    }
-
+    bool sessions_retained = already_associated &&
+        req->pfcp_session_retention_information.presence &&
+        !req->pfcp_session_retention_information.cp_pfcp_entity_ip_address.presence;
+    uint8_t cause = ogs_pfcp_validate_setup(&req->node_id,
+            &req->recovery_time_stamp, NULL);
+    if (ogs_pfcp_up_send_association_setup_response_with_retention(
+                xact, cause, sessions_retained) != OGS_OK ||
+            cause != OGS_PFCP_CAUSE_REQUEST_ACCEPTED) return false;
+    ogs_pfcp_self()->cp_function_features.octet5 =
+        req->cp_function_features.presence ? req->cp_function_features.u8 : 0;
+    ogs_pfcp_pool_snapshot_publish(node, NULL);
     return true;
 }
 
@@ -164,14 +196,17 @@ bool ogs_pfcp_up_handle_association_setup_response(
         ogs_pfcp_node_t *node, ogs_pfcp_xact_t *xact,
         ogs_pfcp_association_setup_response_t *rsp)
 {
-    ogs_assert(xact);
-    ogs_pfcp_xact_commit(xact);
-
-    if (rsp->cp_function_features.presence) {
-        ogs_pfcp_self()->cp_function_features.octet5 =
-            rsp->cp_function_features.u8;
+    if (xact->association_epoch != node->association_epoch ||
+            ogs_pfcp_validate_setup(&rsp->node_id, &rsp->recovery_time_stamp,
+                &rsp->cause) != OGS_PFCP_CAUSE_REQUEST_ACCEPTED ||
+            rsp->cause.u8 != OGS_PFCP_CAUSE_REQUEST_ACCEPTED) {
+        ogs_pfcp_setup_response_error(xact);
+        return false;
     }
-
+    if (ogs_pfcp_xact_commit(xact) != OGS_OK) return false;
+    ogs_pfcp_self()->cp_function_features.octet5 =
+        rsp->cp_function_features.presence ? rsp->cp_function_features.u8 : 0;
+    ogs_pfcp_pool_snapshot_publish(node, NULL);
     return true;
 }
 

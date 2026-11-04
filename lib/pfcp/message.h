@@ -20,8 +20,8 @@
 /*******************************************************************************
  * This file had been created by pfcp-tlv.py script v0.1.0
  * Please do not modify this file but regenerate it via script.
- * Created on: 2026-06-16 15:45:22.214806 by acetcom
- * from r19.5.0/29244-j50.docx
+ * Created on: 2026-10-07 17:05:00.818826 by marujo
+ * from lib/pfcp/support/r19.5.0/29244-j50.docx
  ******************************************************************************/
 
 #if !defined(OGS_PFCP_INSIDE) && !defined(OGS_PFCP_COMPILATION)
@@ -1313,7 +1313,7 @@ typedef struct ogs_pfcp_tlv_create_pdr_s {
     ogs_pfcp_tlv_mar_id_t mar_id;
     ogs_pfcp_tlv_packet_replication_and_detection_carry_on_information_t packet_replication_and_detection_carry_on_information;
     ogs_pfcp_tlv_ip_multicast_addressing_info_within_pfcp_session_establishment_request_t ip_multicast_addressing_info;
-    ogs_pfcp_tlv_ue_ip_address_t ue_ip_address_pool_identity;
+    ogs_pfcp_tlv_ue_ip_address_pool_identity_t ue_ip_address_pool_identity[2];
     ogs_pfcp_tlv_multipath_applicable_indication_t multipath_applicable_indication;
     ogs_pfcp_tlv_transport_delay_reporting_t transport_delay_reporting;
     ogs_pfcp_tlv_rat_type_t rat_type;
@@ -2003,9 +2003,9 @@ typedef struct ogs_pfcp_tlv_atsss_control_parameters_s {
 
 typedef struct ogs_pfcp_tlv_ue_ip_address_pool_information_s {
     ogs_tlv_presence_t presence;
-    ogs_pfcp_tlv_ue_ip_address_t ue_ip_address_pool_identity;
+    ogs_pfcp_tlv_ue_ip_address_pool_identity_t ue_ip_address_pool_identity[16];
     ogs_pfcp_tlv_network_instance_t network_instance;
-    ogs_pfcp_tlv_s_nssai_t s_nssai;
+    ogs_pfcp_tlv_s_nssai_t s_nssai[8];
     ogs_pfcp_tlv_ip_version_t ip_version;
 } ogs_pfcp_tlv_ue_ip_address_pool_information_t;
 
@@ -2082,7 +2082,7 @@ typedef struct ogs_pfcp_tlv_ue_ip_address_usage_information_s {
     ogs_pfcp_tlv_validity_timer_t validity_timer;
     ogs_pfcp_tlv_number_of_ue_ip_addresses_t number_of_ue_ip_addresses;
     ogs_pfcp_tlv_network_instance_t network_instance;
-    ogs_pfcp_tlv_ue_ip_address_t ue_ip_address_pool_id;
+    ogs_pfcp_tlv_ue_ip_address_pool_identity_t ue_ip_address_pool_id;
     ogs_pfcp_tlv_s_nssai_t s_nssai;
 } ogs_pfcp_tlv_ue_ip_address_usage_information_t;
 
@@ -2237,7 +2237,7 @@ typedef struct ogs_pfcp_association_setup_request_s {
     ogs_pfcp_tlv_alternative_smf_ip_address_t alternative_smf_ip_address;
     ogs_pfcp_tlv_smf_set_id_t smf_set_id;
     ogs_pfcp_tlv_pfcp_session_retention_information_within_pfcp_association_setup_request_t pfcp_session_retention_information;
-    ogs_pfcp_tlv_ue_ip_address_t ue_ip_address_pool_information;
+    ogs_pfcp_tlv_ue_ip_address_pool_information_t ue_ip_address_pool_information[16];
     ogs_pfcp_tlv_gtp_u_path_qos_control_information_t gtp_u_path_qos_control_information;
     ogs_pfcp_tlv_clock_drift_control_information_t clock_drift_control_information;
     ogs_pfcp_tlv_nf_instance_id_t upf_instance_id;
@@ -2258,7 +2258,7 @@ typedef struct ogs_pfcp_association_setup_response_s {
     ogs_pfcp_tlv_smf_set_id_t smf_set_id;
     ogs_pfcp_tlv_pfcpasrsp_flags_t pfcpasrsp_flags;
     ogs_pfcp_tlv_clock_drift_control_information_t clock_drift_control_information;
-    ogs_pfcp_tlv_ue_ip_address_t ue_ip_address_pool_information;
+    ogs_pfcp_tlv_ue_ip_address_pool_information_t ue_ip_address_pool_information[16];
     ogs_pfcp_tlv_gtp_u_path_qos_control_information_t gtp_u_path_qos_control_information;
     ogs_pfcp_tlv_nf_instance_id_t upf_instance_id;
     ogs_pfcp_tlv_n6_delay_measurement_control_information_t n6_delay_measurement_control_information;
@@ -2277,7 +2277,7 @@ typedef struct ogs_pfcp_association_update_request_s {
     ogs_pfcp_tlv_alternative_smf_ip_address_t alternative_smf_ip_address;
     ogs_pfcp_tlv_smf_set_id_t smf_set_id;
     ogs_pfcp_tlv_clock_drift_control_information_t clock_drift_control_information;
-    ogs_pfcp_tlv_ue_ip_address_t ue_ip_address_pool_information;
+    ogs_pfcp_tlv_ue_ip_address_pool_information_t ue_ip_address_pool_information[16];
     ogs_pfcp_tlv_gtp_u_path_qos_control_information_t gtp_u_path_qos_control_information;
     ogs_pfcp_tlv_ue_ip_address_usage_information_t ue_ip_address_usage_information;
     ogs_pfcp_tlv_n6_delay_measurement_control_information_t n6_delay_measurement_control_information;
@@ -2544,6 +2544,8 @@ typedef struct ogs_pfcp_session_report_response_s {
 
 typedef struct ogs_pfcp_message_s {
    ogs_pfcp_header_t h;
+   ogs_pfcp_pool_decode_result_t pool_information;
+   ogs_pkbuf_t *pool_decode_storage; /* owned filtered association body */
    union {
         ogs_pfcp_heartbeat_request_t pfcp_heartbeat_request;
         ogs_pfcp_heartbeat_response_t pfcp_heartbeat_response;

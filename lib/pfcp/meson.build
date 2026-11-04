@@ -37,6 +37,8 @@ libpfcp_sources = files('''
     ogs-pfcp.h
 
     message.h
+    pool-codec.h
+    association.h
     types.h
     conv.h
     build.h
@@ -48,6 +50,8 @@ libpfcp_sources = files('''
     util.h
 
     message.c
+    pool-codec.c
+    association.c
     types.c
     conv.c
     build.c

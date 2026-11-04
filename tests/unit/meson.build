@@ -29,6 +29,8 @@ testunit_unit_sources = files('''
     mme-dns-select-test.c
     ipfw-test.c
     pfcp-rule-test.c
+    pfcp-pool-test.c
+    pfcp-association-test.c
 '''.split())
 
 testunit_unit_exe = executable('unit',
@@ -45,3 +47,22 @@ testunit_unit_exe = executable('unit',
                     libmme_dep])
 
 test('unit', testunit_unit_exe, is_parallel : false, suite: 'unit')
+
+# Link the actual SMF context/selector, without copying production functions.
+smf_selection_exe = executable('smf-selection',
+    sources : ['smf-selection-main.c', 'smf-selection-test.c'],
+    c_args : testunit_core_cc_flags,
+    include_directories : [srcinc, include_directories('../../src/smf')],
+    dependencies : libsmf_dep)
+test('smf-selection', smf_selection_exe, is_parallel : false, suite: 'unit')
+
+# Test-only pipe commands run on the real SMF poll thread. Register before the
+# thread starts; no production API or NF behavior is added by this executable.
+if cc.get_id() in ['gcc', 'clang'] and host_machine.system() == 'linux'
+    executable('smf-selector-driver',
+        sources : ['smf-selector-driver.c', '../../src/main.c'],
+        c_args : '-DDEFAULT_CONFIG_FILENAME="smf.yaml"',
+        include_directories : [srcinc, include_directories('../../src/smf')],
+        dependencies : libsmf_dep,
+        link_args : '-Wl,--wrap=smf_pfcp_open')
+endif

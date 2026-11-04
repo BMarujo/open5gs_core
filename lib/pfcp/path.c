@@ -36,8 +36,8 @@ ogs_sock_t *ogs_pfcp_server(ogs_socknode_t *node)
     return pfcp;
 }
 
-/* Minimum PFCP header length (e.g., 12 bytes) */
-#define MIN_PFCP_HEADER_LENGTH 12
+/* Non-SEID PFCP header length. SEID headers require 16 bytes. */
+#define MIN_PFCP_HEADER_LENGTH 8
 
 /*
  * ogs_pfcp_recvfrom
@@ -45,7 +45,9 @@ ogs_sock_t *ogs_pfcp_server(ogs_socknode_t *node)
  * Receives a PFCP message from the socket 'fd'. It allocates a pkbuf,
  * receives the message, trims the pkbuf, and verifies the header.
  * If any error occurs (e.g., too short message, unsupported version, or
- * incomplete message), the function frees the pkbuf and returns NULL.
+ * incomplete message), the function frees the pkbuf and returns NULL. Setup
+ * length defects are deferred to association prevalidation so that matched
+ * erroneous responses still complete their transaction and notify the NF.
  *
  * The sender's address is stored in 'from'.
  *
@@ -102,6 +104,18 @@ ogs_pkbuf_t *ogs_pfcp_recvfrom(ogs_socket_t fd, ogs_sockaddr_t *from)
             ogs_log_message(OGS_LOG_ERROR, ogs_socket_errno,
                 "ogs_sendto() failed");
         }
+        if (h->type == OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE)
+            ogs_pfcp_setup_pre_receive(pkbuf, from, false);
+        ogs_pkbuf_free(pkbuf);
+        return NULL;
+    }
+
+    /* Setup errors need the complete raw header for transaction correlation;
+     * their own prevalidation handles even inconsistent advertised lengths. */
+    if (h->type == OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE ||
+            h->type == OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE)
+        return pkbuf;
+    if (h->seid_presence && size < 16) {
         ogs_pkbuf_free(pkbuf);
         return NULL;
     }
@@ -277,15 +291,18 @@ int ogs_pfcp_cp_send_association_setup_request(ogs_pfcp_node_t *node,
         return OGS_ERROR;
     }
 
-    pkbuf = ogs_pfcp_cp_build_association_setup_request(h.type);
+    pkbuf = ogs_pfcp_cp_build_association_setup_request_with_retention(
+            h.type, node->retain_sessions_on_setup);
     if (!pkbuf) {
         ogs_error("ogs_pfcp_cp_build_association_setup_request() failed");
+        ogs_pfcp_xact_delete(xact);
         return OGS_ERROR;
     }
 
     rv = ogs_pfcp_xact_update_tx(xact, &h, pkbuf);
     if (rv != OGS_OK) {
         ogs_error("ogs_pfcp_xact_update_tx() failed");
+        ogs_pfcp_xact_delete(xact);
         return OGS_ERROR;
     }
 
@@ -349,12 +366,14 @@ int ogs_pfcp_up_send_association_setup_request(ogs_pfcp_node_t *node,
     pkbuf = ogs_pfcp_up_build_association_setup_request(h.type);
     if (!pkbuf) {
         ogs_error("ogs_pfcp_build_heartbeat_request() failed");
+        ogs_pfcp_xact_delete(xact);
         return OGS_ERROR;
     }
 
     rv = ogs_pfcp_xact_update_tx(xact, &h, pkbuf);
     if (rv != OGS_OK) {
         ogs_error("ogs_pfcp_xact_update_tx() failed");
+        ogs_pfcp_xact_delete(xact);
         return OGS_ERROR;
     }
 
@@ -367,6 +386,13 @@ int ogs_pfcp_up_send_association_setup_request(ogs_pfcp_node_t *node,
 int ogs_pfcp_up_send_association_setup_response(ogs_pfcp_xact_t *xact,
         uint8_t cause)
 {
+    return ogs_pfcp_up_send_association_setup_response_with_retention(
+            xact, cause, false);
+}
+
+int ogs_pfcp_up_send_association_setup_response_with_retention(
+        ogs_pfcp_xact_t *xact, uint8_t cause, bool sessions_retained)
+{
     int rv;
     ogs_pkbuf_t *pkbuf = NULL;
     ogs_pfcp_header_t h;
@@ -377,7 +403,8 @@ int ogs_pfcp_up_send_association_setup_response(ogs_pfcp_xact_t *xact,
     h.type = OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE;
     h.seid = 0;
 
-    pkbuf = ogs_pfcp_up_build_association_setup_response(h.type, cause);
+    pkbuf = ogs_pfcp_up_build_association_setup_response_with_retention(
+            h.type, cause, sessions_retained);
     if (!pkbuf) {
         ogs_error("ogs_pfcp_up_build_association_setup_response() failed");
         return OGS_ERROR;
@@ -561,6 +588,17 @@ void ogs_pfcp_send_error_message(
     ogs_pkbuf_t *pkbuf = NULL;
 
     ogs_assert(xact);
+
+    if (type == OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE) {
+        /* Setup has no Offending IE in table 7.4.4.2-1. */
+        pkbuf = ogs_pfcp_cp_build_association_setup_response(type, cause_value);
+        if (!pkbuf) return;
+        memset(&errmsg.h, 0, sizeof(errmsg.h));
+        errmsg.h.type = type;
+        if (ogs_pfcp_xact_update_tx(xact, &errmsg.h, pkbuf) == OGS_OK)
+            ogs_expect(ogs_pfcp_xact_commit(xact) == OGS_OK);
+        return;
+    }
 
     memset(&errmsg, 0, sizeof(ogs_pfcp_message_t));
     errmsg.h.seid = seid;

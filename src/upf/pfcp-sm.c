@@ -76,6 +76,12 @@ void upf_pfcp_state_will_associate(ogs_fsm_t *s, upf_event_t *e)
 
     switch (e->id) {
     case OGS_FSM_ENTRY_SIG:
+        /* A passive peer must also recover from a one-sided timeout. */
+        if (!node->t_association && node->association_generation) {
+            node->t_association = ogs_timer_add(ogs_app()->timer_mgr,
+                    upf_timer_association, node);
+            ogs_assert(node->t_association);
+        }
         if (node->t_association) {
             ogs_timer_start(node->t_association,
                 ogs_local_conf()->time.message.pfcp.association_interval);
@@ -126,14 +132,14 @@ void upf_pfcp_state_will_associate(ogs_fsm_t *s, upf_event_t *e)
                     &message->pfcp_heartbeat_response));
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE:
-            ogs_pfcp_up_handle_association_setup_request(node, xact,
-                    &message->pfcp_association_setup_request);
-            OGS_FSM_TRAN(s, upf_pfcp_state_associated);
+            if (ogs_pfcp_up_handle_association_setup_request(node, xact,
+                    &message->pfcp_association_setup_request, false))
+                OGS_FSM_TRAN(s, upf_pfcp_state_associated);
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE:
-            ogs_pfcp_up_handle_association_setup_response(node, xact,
-                    &message->pfcp_association_setup_response);
-            OGS_FSM_TRAN(s, upf_pfcp_state_associated);
+            if (ogs_pfcp_up_handle_association_setup_response(node, xact,
+                    &message->pfcp_association_setup_response))
+                OGS_FSM_TRAN(s, upf_pfcp_state_associated);
             break;
         default:
             ogs_warn("cannot handle PFCP message type[%d]",
@@ -183,6 +189,7 @@ void upf_pfcp_state_associated(ogs_fsm_t *s, upf_event_t *e)
     case OGS_FSM_EXIT_SIG:
         ogs_info("PFCP de-associated %s",
                 ogs_sockaddr_to_string_static(node->addr_list));
+        ogs_pfcp_pool_snapshot_clear(node);
         ogs_timer_stop(node->t_no_heartbeat);
 
         upf_metrics_inst_global_dec(UPF_METR_GLOB_GAUGE_PFCP_PEERS_ACTIVE);
@@ -271,14 +278,16 @@ void upf_pfcp_state_associated(ogs_fsm_t *s, upf_event_t *e)
         case OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE:
             ogs_warn("PFCP[REQ] has already been associated %s",
                     ogs_sockaddr_to_string_static(node->addr_list));
-            ogs_pfcp_up_handle_association_setup_request(node, xact,
-                    &message->pfcp_association_setup_request);
+            if (!ogs_pfcp_up_handle_association_setup_request(node, xact,
+                    &message->pfcp_association_setup_request, true))
+                ogs_warn("PFCP replacement failed; current live association retained");
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE:
             ogs_warn("PFCP[RSP] has already been associated %s",
                     ogs_sockaddr_to_string_static(node->addr_list));
-            ogs_pfcp_up_handle_association_setup_response(node, xact,
-                    &message->pfcp_association_setup_response);
+            if (!ogs_pfcp_up_handle_association_setup_response(node, xact,
+                    &message->pfcp_association_setup_response))
+                ogs_warn("PFCP replacement failed; current live association retained");
             break;
         case OGS_PFCP_SESSION_ESTABLISHMENT_REQUEST_TYPE:
             sess = upf_sess_add_by_message(message);

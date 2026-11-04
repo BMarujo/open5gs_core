@@ -78,6 +78,15 @@ void smf_pfcp_state_will_associate(ogs_fsm_t *s, smf_event_t *e)
 
     switch (e->h.id) {
     case OGS_FSM_ENTRY_SIG:
+        /* A learned peer can remain alive after only this side times out.
+         * Once an association existed, actively retry Setup instead of waiting
+         * indefinitely for a peer that still considers itself associated. */
+        if (!node->t_association && node->association_generation) {
+            node->t_association = ogs_timer_add(ogs_app()->timer_mgr,
+                    smf_timer_pfcp_association, node);
+            ogs_assert(node->t_association);
+        }
+        node->retain_sessions_on_setup = node->association_generation != 0;
         if (node->t_association) {
             ogs_timer_start(node->t_association,
                     ogs_local_conf()->time.message.pfcp.association_interval);
@@ -87,6 +96,7 @@ void smf_pfcp_state_will_associate(ogs_fsm_t *s, smf_event_t *e)
         break;
 
     case OGS_FSM_EXIT_SIG:
+        node->retain_sessions_on_setup = false;
         if (node->t_association) {
             ogs_timer_stop(node->t_association);
         }
@@ -147,14 +157,14 @@ void smf_pfcp_state_will_associate(ogs_fsm_t *s, smf_event_t *e)
                     &message->pfcp_heartbeat_response));
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE:
-            ogs_pfcp_cp_handle_association_setup_request(node, xact,
-                    &message->pfcp_association_setup_request);
-            OGS_FSM_TRAN(s, smf_pfcp_state_associated);
+            if (ogs_pfcp_cp_handle_association_setup_request(node, xact,
+                    &message->pfcp_association_setup_request, &message->pool_information))
+                OGS_FSM_TRAN(s, smf_pfcp_state_associated);
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE:
-            ogs_pfcp_cp_handle_association_setup_response(node, xact,
-                    &message->pfcp_association_setup_response);
-            OGS_FSM_TRAN(s, smf_pfcp_state_associated);
+            if (ogs_pfcp_cp_handle_association_setup_response(node, xact,
+                    &message->pfcp_association_setup_response, &message->pool_information))
+                OGS_FSM_TRAN(s, smf_pfcp_state_associated);
             break;
         default:
             ogs_warn("cannot handle PFCP message type[%d]",
@@ -204,6 +214,7 @@ void smf_pfcp_state_associated(ogs_fsm_t *s, smf_event_t *e)
     case OGS_FSM_EXIT_SIG:
         ogs_info("PFCP de-associated %s",
             ogs_sockaddr_to_string_static(node->addr_list));
+        ogs_pfcp_pool_snapshot_clear(node);
         ogs_timer_stop(node->t_no_heartbeat);
 
         smf_metrics_inst_global_dec(SMF_METR_GLOB_GAUGE_PFCP_PEERS_ACTIVE);
@@ -302,14 +313,16 @@ void smf_pfcp_state_associated(ogs_fsm_t *s, smf_event_t *e)
         case OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE:
             ogs_warn("PFCP[REQ] has already been associated %s",
                     ogs_sockaddr_to_string_static(node->addr_list));
-            ogs_pfcp_cp_handle_association_setup_request(node, xact,
-                    &message->pfcp_association_setup_request);
+            if (!ogs_pfcp_cp_handle_association_setup_request(node, xact,
+                    &message->pfcp_association_setup_request, &message->pool_information))
+                ogs_warn("PFCP replacement failed; current live association retained");
             break;
         case OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE:
             ogs_warn("PFCP[RSP] has already been associated %s",
                     ogs_sockaddr_to_string_static(node->addr_list));
-            ogs_pfcp_cp_handle_association_setup_response(node, xact,
-                    &message->pfcp_association_setup_response);
+            if (!ogs_pfcp_cp_handle_association_setup_response(node, xact,
+                    &message->pfcp_association_setup_response, &message->pool_information))
+                ogs_warn("PFCP replacement failed; current live association retained");
             break;
         case OGS_PFCP_SESSION_ESTABLISHMENT_RESPONSE_TYPE:
             if (!message->h.seid_presence) ogs_error("No SEID");
@@ -434,6 +447,7 @@ void smf_pfcp_state_associated(ogs_fsm_t *s, smf_event_t *e)
          */
         node = e->pfcp_node;
         ogs_assert(node);
+        ogs_pfcp_pool_snapshot_clear(node);
         reselect_upf(node);
 
         OGS_FSM_TRAN(s, smf_pfcp_state_will_associate);

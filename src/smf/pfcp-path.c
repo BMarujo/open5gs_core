@@ -123,6 +123,12 @@ static void pfcp_recv_cb(short when, ogs_socket_t fd, void *data)
      * it can cause stack overflow.
      * To avoid this, the pfcp_message structure uses heap memory.
      */
+    if (!ogs_pfcp_setup_pre_receive(pkbuf, &from, true)) {
+        ogs_pkbuf_free(pkbuf);
+        ogs_event_free(e);
+        return;
+    }
+
     if ((message = ogs_pfcp_parse_msg(pkbuf)) == NULL) {
         ogs_error("ogs_pfcp_parse_msg() failed");
         ogs_pkbuf_free(pkbuf);
@@ -165,8 +171,7 @@ static void pfcp_recv_cb(short when, ogs_socket_t fd, void *data)
     node = ogs_pfcp_node_find(&ogs_pfcp_self()->pfcp_peer_list,
             pfcp_status == OGS_PFCP_STATUS_SUCCESS ? &node_id : NULL, &from);
     if (!node) {
-        if (message->h.type == OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE ||
-            message->h.type == OGS_PFCP_ASSOCIATION_SETUP_RESPONSE_TYPE) {
+        if (message->h.type == OGS_PFCP_ASSOCIATION_SETUP_REQUEST_TYPE) {
             ogs_assert(pfcp_status == OGS_PFCP_STATUS_SUCCESS);
             node = ogs_pfcp_node_add(&ogs_pfcp_self()->pfcp_peer_list,
                     &node_id, &from);

@@ -77,6 +77,12 @@ ogs_pkbuf_t *ogs_pfcp_build_heartbeat_response(uint8_t type)
 
 ogs_pkbuf_t *ogs_pfcp_cp_build_association_setup_request(uint8_t type)
 {
+    return ogs_pfcp_cp_build_association_setup_request_with_retention(type, false);
+}
+
+ogs_pkbuf_t *ogs_pfcp_cp_build_association_setup_request_with_retention(
+        uint8_t type, bool request_retention)
+{
     ogs_pfcp_message_t *pfcp_message = NULL;
     ogs_pfcp_association_setup_request_t *req = NULL;
     ogs_pkbuf_t *pkbuf = NULL;
@@ -113,6 +119,23 @@ ogs_pkbuf_t *ogs_pfcp_cp_build_association_setup_request(uint8_t type)
     pfcp_message->h.type = type;
     pkbuf = ogs_pfcp_build_msg(pfcp_message);
     ogs_expect(pkbuf);
+
+    /* The shared TLV builder cannot emit an empty compound. R19 table
+     * 7.4.4.1-2 explicitly defines empty IE 183 as retaining all sessions.
+     * Append that four-byte IE here without changing GTP/core TLV behavior. */
+    if (pkbuf && request_retention) {
+        static const uint8_t retention[] = {0, 183, 0, 0};
+        ogs_pkbuf_t *retained = ogs_pkbuf_alloc(NULL,
+                OGS_TLV_MAX_HEADROOM + pkbuf->len + sizeof(retention));
+        if (retained) {
+            ogs_pkbuf_reserve(retained, OGS_TLV_MAX_HEADROOM);
+            memcpy(ogs_pkbuf_put(retained, pkbuf->len), pkbuf->data, pkbuf->len);
+            memcpy(ogs_pkbuf_put(retained, sizeof(retention)),
+                    retention, sizeof(retention));
+        }
+        ogs_pkbuf_free(pkbuf);
+        pkbuf = retained;
+    }
 
     ogs_free(pfcp_message);
 
@@ -152,11 +175,13 @@ ogs_pkbuf_t *ogs_pfcp_cp_build_association_setup_response(uint8_t type,
     rsp->cause.presence = 1;
     rsp->cause.u8 = cause;
 
-    rsp->recovery_time_stamp.presence = 1;
-    rsp->recovery_time_stamp.u32 = ogs_pfcp_self()->local_recovery;
+    if (cause == OGS_PFCP_CAUSE_REQUEST_ACCEPTED) {
+        rsp->recovery_time_stamp.presence = 1;
+        rsp->recovery_time_stamp.u32 = ogs_pfcp_self()->local_recovery;
 
-    rsp->cp_function_features.presence = 1;
-    rsp->cp_function_features.u8 = ogs_pfcp_self()->cp_function_features.octet5;
+        rsp->cp_function_features.presence = 1;
+        rsp->cp_function_features.u8 = ogs_pfcp_self()->cp_function_features.octet5;
+    }
 
     pfcp_message->h.type = type;
     pkbuf = ogs_pfcp_build_msg(pfcp_message);
@@ -173,6 +198,7 @@ ogs_pkbuf_t *ogs_pfcp_up_build_association_setup_request(uint8_t type)
     ogs_pfcp_association_setup_request_t *req = NULL;
     ogs_pkbuf_t *pkbuf = NULL;
 
+    ogs_pfcp_pool_build_storage_t pool_storage;
     ogs_pfcp_node_id_t node_id;
     int node_id_len = 0, rv;
 
@@ -204,6 +230,12 @@ ogs_pkbuf_t *ogs_pfcp_up_build_association_setup_request(uint8_t type)
     req->up_function_features.data = &ogs_pfcp_self()->up_function_features;
     req->up_function_features.len = ogs_pfcp_self()->up_function_features_len;
 
+    if (ogs_pfcp_build_pool_information(req->ue_ip_address_pool_information,
+                &pool_storage) != OGS_OK) {
+        ogs_free(pfcp_message);
+        return NULL;
+    }
+
     pfcp_message->h.type = type;
     pkbuf = ogs_pfcp_build_msg(pfcp_message);
     ogs_expect(pkbuf);
@@ -216,10 +248,19 @@ ogs_pkbuf_t *ogs_pfcp_up_build_association_setup_request(uint8_t type)
 ogs_pkbuf_t *ogs_pfcp_up_build_association_setup_response(uint8_t type,
         uint8_t cause)
 {
+    return ogs_pfcp_up_build_association_setup_response_with_retention(
+            type, cause, false);
+}
+
+ogs_pkbuf_t *ogs_pfcp_up_build_association_setup_response_with_retention(
+        uint8_t type, uint8_t cause, bool sessions_retained)
+{
     ogs_pfcp_message_t *pfcp_message = NULL;
     ogs_pfcp_association_setup_response_t *rsp = NULL;
     ogs_pkbuf_t *pkbuf = NULL;
 
+    ogs_pfcp_pool_build_storage_t pool_storage;
+    uint8_t flags = 1; /* PFCPASRsp-Flags: PSREI, R19 8.2.134 */
     ogs_pfcp_node_id_t node_id;
     int node_id_len = 0, rv;
 
@@ -246,13 +287,27 @@ ogs_pkbuf_t *ogs_pfcp_up_build_association_setup_response(uint8_t type,
     rsp->cause.presence = 1;
     rsp->cause.u8 = cause;
 
-    rsp->recovery_time_stamp.presence = 1;
-    rsp->recovery_time_stamp.u32 = ogs_pfcp_self()->local_recovery;
+    if (cause == OGS_PFCP_CAUSE_REQUEST_ACCEPTED) {
+        rsp->recovery_time_stamp.presence = 1;
+        rsp->recovery_time_stamp.u32 = ogs_pfcp_self()->local_recovery;
 
-    ogs_assert(ogs_pfcp_self()->up_function_features_len);
-    rsp->up_function_features.presence = 1;
-    rsp->up_function_features.data = &ogs_pfcp_self()->up_function_features;
-    rsp->up_function_features.len = ogs_pfcp_self()->up_function_features_len;
+        ogs_assert(ogs_pfcp_self()->up_function_features_len);
+        rsp->up_function_features.presence = 1;
+        rsp->up_function_features.data = &ogs_pfcp_self()->up_function_features;
+        rsp->up_function_features.len = ogs_pfcp_self()->up_function_features_len;
+
+        if (sessions_retained) {
+            rsp->pfcpasrsp_flags.presence = 1;
+            rsp->pfcpasrsp_flags.data = &flags;
+            rsp->pfcpasrsp_flags.len = 1;
+        }
+
+        if (ogs_pfcp_build_pool_information(rsp->ue_ip_address_pool_information,
+                    &pool_storage) != OGS_OK) {
+            ogs_free(pfcp_message);
+            return NULL;
+        }
+    }
 
     pfcp_message->h.type = type;
     pkbuf = ogs_pfcp_build_msg(pfcp_message);
