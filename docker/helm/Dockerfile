@@ -23,7 +23,7 @@ LABEL org.opencontainers.image.title="Open5GS dynamic DNN - Helm runtime" \
       org.open5gs.protocol.profile="TS 29.244 V19.5.0 (scoped MVP)"
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates bash tini iproute2 iptables procps iputils-ping \
-        tcpdump tshark curl libtalloc2 libyaml-0-2 libsctp1 libc-ares2 \
+        tcpdump tshark curl libtins4.5 libtalloc2 libyaml-0-2 libsctp1 libc-ares2 \
         libgnutls30t64 libgcrypt20 libssl3t64 libmongoc-1.0-0t64 libbson-1.0-0t64 \
         libnghttp2-14 libmicrohttpd12t64 libcurl4t64 libcurl3t64-gnutls libidn12 \
     && rm -rf /var/lib/apt/lists/*
