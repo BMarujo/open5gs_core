@@ -5,6 +5,20 @@ Plano de desenvolvimento e prompts sequenciais para Codex no VS Code.
 Preparado em 5 de outubro de 2026; atualizado após as etapas autorizadas abaixo.
 Este documento contém o plano e o estado das entregas, sem certificação de conformidade.
 
+## Follow-up — quatro UEs sem limites TC, 8 de novembro de 2026
+
+Concluída comparação original/nova com quatro UEs simultâneos, cinco pares,
+quarenta sessões e oitenta medições TCP UL/DL. Removidas temporariamente as seis
+stacks HTB/netem, sem limite de envio TCP; QoS comum de 10 Gbit/s confirmado no
+wire. Resultado: PASS no critério estatístico declarado; números e intervalos
+preservados no relatório, sem alegar taxas exatamente idênticas. Perfis TC
+restaurados, namespaces próprios removidos e instalação normal preservada.
+O piloto UDP sem pacing esgotou memória dos simuladores UE no core original;
+não existe comparação UDP ilimitado válida. Nenhuma alteração a binários/imagem
+do core ou ao cluster físico nesta extensão.
+
+[Relatório em inglês, dados por UE, CPU, limites e reprodução](docs/design/dynamic-dnn-multiue.md).
+
 ## Entrega atual — comparação de desempenho e publicação, 8 de novembro de 2026
 
 Follow-up autorizado concluído: código atualizado em `384a54f4d9a`, commit/push,

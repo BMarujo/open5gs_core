@@ -1,5 +1,9 @@
 # Dynamic DNN learning with the existing SMF selector
 
+A subsequent [four-UE unshaped TCP comparison](dynamic-dnn-multiue.md) removes
+the 50-Mbit/s access profile, repeats original/new UL/DL in five pairs and records
+its own scope, retained UDP generator failure and verified TC rollback.
+
 This fork advertises configured UPF pools during PFCP Association Setup, learns
 their DNNs in SMF-owned memory and uses them in the existing DNN selection arm.
 A UPF can initiate association and become selectable without a static per-peer

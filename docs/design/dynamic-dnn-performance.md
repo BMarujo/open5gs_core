@@ -1,5 +1,9 @@
 # Original versus learned-DNN core: performance comparison and publication
 
+A subsequent [four-UE unshaped TCP comparison](dynamic-dnn-multiue.md) removes
+the 50-Mbit/s access profile, repeats original/new UL/DL in five pairs and records
+its own scope, retained UDP generator failure and verified TC rollback.
+
 2026-11-08. The user requested a controlled Containernet comparison, publication
 of the latest source image, and rollout to both Containernet and the physical
 cluster. The performance comparison passed its predefined engineering screen.
