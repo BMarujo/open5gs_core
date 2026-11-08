@@ -150,6 +150,9 @@ static void test_identity_helpers(abts_case *tc, void *data)
     ABTS_INT_EQUAL(tc, OGS_OK, ogs_pfcp_parse_pool_identity(&octet, &identity, &n));
     ABTS_SIZE_EQUAL(tc, 65, n); /* Wire helper, distinct from local profile. */
     buffer[1]--;
+    ABTS_INT_EQUAL(tc, OGS_OK, ogs_pfcp_parse_pool_identity(&octet, &identity, &n));
+    ABTS_SIZE_EQUAL(tc, 64, n); /* Remaining octet is an unknown extension. */
+    buffer[1] = 66;
     ABTS_INT_EQUAL(tc, OGS_ERROR, ogs_pfcp_parse_pool_identity(&octet, &identity, &n));
     {
         uint8_t *large = ogs_malloc(65535), *large_id = ogs_malloc(65533);
@@ -236,6 +239,31 @@ static void test_optional_semantics(abts_case *tc, void *data)
     check_body(tc, body, b, OGS_PFCP_POOL_UNUSABLE, 0, 1);
     b = put_ie(body, 60, "\0\x7f\0\0\x08", 5);
     check_body(tc, body, b, OGS_PFCP_POOL_ABSENT, 0, 0);
+}
+
+static void test_extensions(abts_case *tc, void *data)
+{
+    /* R19 8.1.2: 177 and 258 are extendable; 257 is fixed length.
+     * Literal independent wire bytes, including unknown trailing octets. */
+    const uint8_t id[] = {0, 1, 'x', 0xfe, 0xed};
+    const uint8_t ip[] = {0x83, 0xfe, 0xed};
+    uint8_t group[64], body[128];
+    size_t n = put_ie(group, 177, id, sizeof(id));
+    size_t b;
+    ogs_tlv_octet_t octet = {0};
+    const uint8_t *identity = NULL;
+    size_t length = 0;
+    octet.data = (void *)id; octet.len = sizeof(id);
+    ABTS_INT_EQUAL(tc, OGS_OK,
+            ogs_pfcp_parse_pool_identity(&octet, &identity, &length));
+    ABTS_SIZE_EQUAL(tc, 1, length);
+    ABTS_PTR_EQUAL(tc, id+2, identity);
+    n += put_ie(group+n, 258, ip, sizeof(ip));
+    b = put_ie(body, 233, group, n);
+    check_body(tc, body, b, OGS_PFCP_POOL_VALID, 1, 0);
+    n += put_ie(group+n, 257, "\1\0\0\1\xff", 5);
+    b = put_ie(body, 233, group, n);
+    check_body(tc, body, b, OGS_PFCP_POOL_UNUSABLE, 0, 1);
 }
 
 static void test_unknowns(abts_case *tc, void *data)
@@ -423,6 +451,7 @@ abts_suite *test_pfcp_pool(abts_suite *suite)
     abts_run_test(suite, test_fixtures, NULL);
     abts_run_test(suite, test_identity_helpers, NULL);
     abts_run_test(suite, test_optional_semantics, NULL);
+    abts_run_test(suite, test_extensions, NULL);
     abts_run_test(suite, test_unknowns, NULL);
     abts_run_test(suite, test_capacities, NULL);
     abts_run_test(suite, test_framing, NULL);

@@ -523,6 +523,56 @@ static void test_up_handlers(abts_case *tc, void *data)
     ogs_pfcp_node_remove(&ogs_pfcp_self()->pfcp_peer_list, node);
 }
 
+static void test_extendable_setup(abts_case *tc, void *data)
+{
+    ogs_pfcp_node_t *node = new_node();
+    uint8_t body[128], id[] = {0,127,0,0,8,0xfe};
+    uint8_t id6[18] = {1};
+    uint8_t ts[] = {0,0,0,1,0xfe,0xed};
+    uint8_t group[64];
+    size_t group_len = put_ie(group, 177, "\0\1x\xfe", 4);
+    unsigned type, node_type;
+    id6[16] = 8; id6[17] = 0xfe;
+    group_len += put_ie(group+group_len, 22, "\5edge1", 6);
+    group_len += put_ie(group+group_len, 258, "\3\xfe", 2);
+    ogs_pfcp_self()->learn_upf_dnn = true;
+    for (node_type = 0; node_type < 2; node_type++)
+    for (type = 5; type <= 6; type++) {
+        ogs_pfcp_xact_t *x = type == 6 ? outstanding(node) : NULL;
+        size_t len = put_ie(body, 60, node_type ? id6 : id,
+                node_type ? sizeof(id6) : sizeof(id));
+        ogs_pkbuf_t *p;
+        ogs_pfcp_message_t *m;
+        ogs_pfcp_node_id_t parsed_id;
+        bool accepted;
+        len += put_ie(body+len, 96, ts, sizeof(ts));
+        len += put_ie(body+len, 233, group, group_len);
+        if (type == 6) len += put_ie(body+len, 19, "\1", 1);
+        p = setup_packet(type, x ? x->xid : 500+node_type, body, len);
+        accepted = ogs_pfcp_setup_pre_receive(p, node->addr_list, true);
+        ABTS_TRUE(tc, accepted);
+        if (accepted) {
+            m = ogs_pfcp_parse_msg(p);
+            ABTS_PTR_NOTNULL(tc, m);
+            if (m) {
+                ABTS_INT_EQUAL(tc, OGS_PFCP_STATUS_SUCCESS,
+                        ogs_pfcp_extract_node_id(m, &parsed_id));
+                ABTS_TRUE(tc, type == 5 ? deliver_request(node, m) :
+                        deliver_response(node, m));
+                ABTS_INT_EQUAL(tc, 1, node->learned_pools->num_groups);
+                ABTS_STR_EQUAL(tc, "edge1", node->learned_pools->groups[0].dnn);
+                ABTS_INT_EQUAL(tc, 3, node->learned_pools->groups[0].family);
+                ABTS_INT_EQUAL(tc, 1, node->learned_pools->groups[0].ids[0].len);
+                ogs_pfcp_message_free(m);
+            }
+        }
+        ogs_pkbuf_free(p);
+    }
+    ABTS_INT_EQUAL(tc, 4, node->association_generation);
+    ogs_pfcp_self()->learn_upf_dnn = false;
+    ogs_pfcp_node_remove(&ogs_pfcp_self()->pfcp_peer_list, node);
+}
+
 static void test_optional_association(abts_case *tc, void *data)
 {
     ogs_pfcp_node_t *node = new_node();
@@ -677,6 +727,7 @@ abts_suite *test_pfcp_association(abts_suite *suite)
     abts_run_test(suite, test_advertisement, NULL);
     abts_run_test(suite, test_erroneous_response, NULL);
     abts_run_test(suite, test_up_handlers, NULL);
+    abts_run_test(suite, test_extendable_setup, NULL);
     abts_run_test(suite, test_optional_association, NULL);
     abts_run_test(suite, test_retention_encoding, NULL);
     ogs_log_set_domain_level(id, level);

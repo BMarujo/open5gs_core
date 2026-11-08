@@ -1,5 +1,9 @@
 # Dynamic DNN discovery: stage 2 codec implementation and evidence
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 Date: 2026-10-07. Baseline HEAD remains
 `2c80f8f2ba9d378bc845d73fe2fbf4820039fc41`, branch `main`, application `2.8.0`.
 Initial local changes were the untracked plan and stage 1 documentation; they

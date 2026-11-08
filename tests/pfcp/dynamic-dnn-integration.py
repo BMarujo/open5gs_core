@@ -289,9 +289,12 @@ def decode_evidence():
 
 exit_code = 1
 try:
-    capture = subprocess.Popen(['tshark', '-i', 'lo', '-f', 'udp port 8805 or udp port 2152',
-        '-w', str(OUT / 'n4-n3.pcapng')], stdout=subprocess.DEVNULL,
-        stderr=(OUT / 'capture.log').open('w'))
+    # Open the output before dumpcap drops privileges. Keep evidence directories
+    # private; capture must not require their ownership or mode to be relaxed.
+    with (OUT / 'n4-n3.pcapng').open('wb') as capture_output:
+        capture = subprocess.Popen(['tshark', '-i', 'lo', '-f',
+            'udp port 8805 or udp port 2152', '-w', '-'], stdout=capture_output,
+            stderr=(OUT / 'capture.log').open('w'))
     time.sleep(.5)
     for name in ['nrf', 'udr', 'udm', 'ausf', 'pcf', 'nssf', 'bsf', 'amf']:
         NF(name)

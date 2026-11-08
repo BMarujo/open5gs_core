@@ -1,6 +1,7 @@
 # Context: source/ is the recorded checkout plus the two pinned Meson vendors.
 # The toolchain image is exported with the local validation evidence; its ID is
-# checked by build.sh. Compilation happens here, never on a Kubernetes node.
+# recorded in the build evidence; pin TOOLCHAIN_IMAGE to that ID when rebuilding.
+# Compilation happens here, never on a Kubernetes node.
 ARG TOOLCHAIN_IMAGE=open5gs-pfcp-codec-build:20261007
 ARG RUNTIME_IMAGE=ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 FROM ${TOOLCHAIN_IMAGE} AS builder
@@ -41,7 +42,7 @@ RUN groupadd --system --gid 999 open5gs \
          if grep -q 'not found' /tmp/ldd-${nf}; then cat /tmp/ldd-${nf}; exit 1; fi; \
        done
 USER 999:999
-# The Gradiant chart overrides USER for the UPF and creates its TUN/NAT in an
-# init container. Do not create another TUN or inject startup sleeps here.
+# The Gradiant UPF chart supplies privileges and creates its TUN/NAT in an init
+# container. Check the rendered securityContext; USER alone does not grant them.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/open5gs-entrypoint"]
 CMD ["/bin/bash"]

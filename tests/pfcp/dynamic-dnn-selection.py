@@ -200,9 +200,10 @@ def selected(nf, dnn, address, reason='dnn', source='learned', slot=2, typ=1):
 
 
 try:
-    capture = subprocess.Popen(['tshark', '-i', 'lo', '-f', 'udp port 8805',
-                '-w', str(OUT / 'selection.pcapng')], stdout=subprocess.DEVNULL,
-                stderr=(OUT / 'tshark.log').open('w'))
+    with (OUT / 'selection.pcapng').open('wb') as capture_output:
+        capture = subprocess.Popen(['tshark', '-i', 'lo', '-f', 'udp port 8805',
+                    '-w', '-'], stdout=capture_output,
+                    stderr=(OUT / 'tshark.log').open('w'))
     time.sleep(.3)
     # Real UPFs, no client.upf entry at all. A precedes B so the first result
     # cannot be explained by fallback. No peer has any location match/list.

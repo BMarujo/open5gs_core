@@ -7,7 +7,6 @@ scenario=${6:-pair}
 [[ $name =~ ^[a-zA-Z0-9_-]+$ ]] || exit 2
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 mkdir "$artifacts/$name"
-chmod 0777 "$artifacts/$name" # dumpcap drops DAC privileges; lab evidence only.
 build_image=${BUILD_IMAGE:-sha256:7e59045bafddbee78b43ed533388cde5da77da3a5b80c807ac2f2f561013a551}
 net_image=$(docker image inspect -f '{{.Id}}' "${NET_IMAGE:-open5gs-pfcp-nettools:nft-1.1.0-1370dbd7f467}")
 lab= net= controller= mongo=

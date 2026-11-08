@@ -1,5 +1,9 @@
 # Correction: preserve newly learned DNNs across late Heartbeat restart detection
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 Subsequent authorized work adds recovery after asymmetric Heartbeat loss and
 fixes pooled-event ownership; see the [follow-up report](dynamic-dnn-pfcp-recovery.md).
 This report and its sealed image bundle describe the earlier correction only.

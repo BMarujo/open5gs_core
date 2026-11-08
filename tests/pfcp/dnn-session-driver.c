@@ -179,14 +179,34 @@ int main(int argc, const char *const argv[])
     /* test_db_insert_ue() consumes doc. */
     printf("RESULT {\"ready\":true,\"imsi\":\"%s\"}\n", test_ue->imsi);
     while (fgets(line, sizeof line, stdin)) {
-        char ip[INET_ADDRSTRLEN], n3[INET_ADDRSTRLEN];
+        char ip[INET_ADDRSTRLEN], ip6[INET6_ADDRSTRLEN], n3[INET_ADDRSTRLEN];
         int fields = sscanf(line, "%15s %u %63s", command, &psi, dnn);
         if (fields < 2) break;
+        if (!strcmp(command, "rs")) {
+            ogs_gtp2_header_desc_t header;
+            int offset;
+            sess = test_sess_find_by_psi(test_ue, psi);
+            ogs_assert(sess && sess->ue_ip.ipv6);
+            ogs_assert(test_gtpu_send_slacc_rs(gtpu,
+                test_qos_flow_find_by_qfi(sess, 1)) == OGS_OK);
+            recvbuf = test_gtpu_read(gtpu);
+            ogs_assert(recvbuf);
+            offset = ogs_gtpu_parse_header(&header, recvbuf);
+            ogs_assert(offset >= OGS_GTPV1U_HEADER_LEN);
+            ogs_assert(recvbuf->len >= offset + 56);
+            ogs_assert(recvbuf->data[offset+6] == IPPROTO_ICMPV6);
+            ogs_assert(recvbuf->data[offset+40] == 134); /* RA */
+            testgtpu_recv(test_ue, recvbuf); /* validates TEID/QFI; learns prefix */
+            inet_ntop(AF_INET6, sess->ue_ip.addr6, ip6, sizeof ip6);
+            printf("RESULT {\"rs\":%u,\"ue_ipv6\":\"%s\"}\n", psi, ip6);
+            continue;
+        }
         if (!strcmp(command, "ping") || !strcmp(command, "probe")) {
             ogs_gtp2_header_desc_t header;
             int offset;
             uint8_t *inner;
             struct in_addr gateway;
+            struct in6_addr gateway6;
             ogs_assert(fields == 3);
             sess = test_sess_find_by_psi(test_ue, psi);
             ogs_assert(sess);
@@ -206,20 +226,33 @@ int main(int argc, const char *const argv[])
             ogs_assert(header.teid == sess->gnb_n3_teid);
             ogs_assert(recvbuf->len >= offset + 28);
             inner = recvbuf->data + offset;
-            ogs_assert(inner[0] == 0x45 && inner[9] == IPPROTO_ICMP);
-            ogs_assert(inner[20] == 0 && inner[21] == 0); /* Echo reply */
-            ogs_assert(inet_pton(AF_INET, dnn, &gateway) == 1);
-            ogs_assert(!memcmp(inner + 12, &gateway, 4));
-            ogs_assert(!memcmp(inner + 16, &sess->ue_ip.addr, 4));
+            if (strchr(dnn, ':')) {
+                ogs_assert(recvbuf->len >= offset + 48);
+                ogs_assert((inner[0] >> 4) == 6 && inner[6] == IPPROTO_ICMPV6);
+                ogs_assert(inner[40] == 129 && inner[41] == 0); /* Echo reply */
+                ogs_assert(inet_pton(AF_INET6, dnn, &gateway6) == 1);
+                ogs_assert(!memcmp(inner + 8, &gateway6, 16));
+                ogs_assert(!memcmp(inner + 24, sess->ue_ip.addr6, 16));
+            } else {
+                ogs_assert(inner[0] == 0x45 && inner[9] == IPPROTO_ICMP);
+                ogs_assert(inner[20] == 0 && inner[21] == 0); /* Echo reply */
+                ogs_assert(inet_pton(AF_INET, dnn, &gateway) == 1);
+                ogs_assert(!memcmp(inner + 12, &gateway, 4));
+                ogs_assert(!memcmp(inner + 16, &sess->ue_ip.addr, 4));
+            }
             printf("RESULT {\"ping\":%u,\"bytes\":%u}\n", psi, recvbuf->len);
             ogs_pkbuf_free(recvbuf);
             continue;
         }
-        ogs_assert(!strcmp(command, "establish") && fields == 3);
+        ogs_assert((!strcmp(command, "establish") ||
+                    !strcmp(command, "establish6") ||
+                    !strcmp(command, "establish46")) && fields == 3);
         sess = test_sess_add_by_dnn_and_psi(test_ue, dnn, psi);
         ogs_assert(sess);
         sess->pti = 20 + psi;
-        sess->pdu_session_type = OGS_PDU_SESSION_TYPE_IPV4;
+        sess->pdu_session_type = !strcmp(command, "establish6") ?
+            OGS_PDU_SESSION_TYPE_IPV6 : !strcmp(command, "establish46") ?
+            OGS_PDU_SESSION_TYPE_IPV4V6 : OGS_PDU_SESSION_TYPE_IPV4;
         sess->ul_nas_transport_param.request_type = OGS_NAS_5GS_REQUEST_TYPE_INITIAL;
         sess->ul_nas_transport_param.dnn = 1;
         sess->pdu_session_establishment_param.ssc_mode = 1;
@@ -242,8 +275,9 @@ int main(int argc, const char *const argv[])
         ogs_assert(testgnb_ngap_send(ngap, sendbuf) == OGS_OK);
         inet_ntop(AF_INET, &sess->ue_ip.addr, ip, sizeof ip);
         inet_ntop(AF_INET, &sess->upf_n3_ip.addr, n3, sizeof n3);
-        printf("RESULT {\"psi\":%u,\"accepted\":true,\"dnn\":\"%s\",\"ue_ip\":\"%s\",\"n3\":\"%s\",\"upf_teid\":%u,\"gnb_teid\":%u}\n",
-                psi, dnn, ip, n3, sess->upf_n3_teid, sess->gnb_n3_teid);
+        printf("RESULT {\"psi\":%u,\"accepted\":true,\"dnn\":\"%s\",\"ue_ip\":\"%s\",\"n3\":\"%s\",\"upf_teid\":%u,\"gnb_teid\":%u,\"ipv4\":%s,\"ipv6\":%s}\n",
+                psi, dnn, ip, n3, sess->upf_n3_teid, sess->gnb_n3_teid,
+                sess->ue_ip.ipv4 ? "true" : "false", sess->ue_ip.ipv6 ? "true" : "false");
     }
     ogs_assert(test_db_remove_ue(test_ue) == OGS_OK);
     test_ue_remove(test_ue);

@@ -142,7 +142,7 @@ ogs_pfcp_pool_snapshot_t *ogs_pfcp_pool_snapshot_prepare(
                 ogs_pfcp_parse_pool_network_instance(p->dnn, sizeof(p->dnn),
                     &g->network_instance) != OGS_OK) goto invalid_group;
         if (g->ip_version.presence) {
-            if (!g->ip_version.data || g->ip_version.len != 1 ||
+            if (!g->ip_version.data || g->ip_version.len < 1 ||
                     !(*(uint8_t *)g->ip_version.data & 3)) goto invalid_group;
             p->family_present = true;
             p->family = *(uint8_t *)g->ip_version.data & 3;
@@ -265,8 +265,10 @@ static bool valid_node_id(const ogs_pfcp_tlv_node_id_t *node)
     const uint8_t *p = node->data;
     if (!node->presence || !p || !node->len) return false;
     switch (p[0] & 15) {
-    case OGS_PFCP_NODE_ID_IPV4: return node->len == 5;
-    case OGS_PFCP_NODE_ID_IPV6: return node->len == 17;
+    /* R19 8.1.2 / 8.2.38: ignore unknown extension octets after the
+     * complete, fixed-size address. FQDN consumes its variable-length value. */
+    case OGS_PFCP_NODE_ID_IPV4: return node->len >= 5;
+    case OGS_PFCP_NODE_ID_IPV6: return node->len >= 17;
     case OGS_PFCP_NODE_ID_FQDN:
         return valid_fqdn(p+1, node->len-1);
     default: return false;
@@ -317,7 +319,7 @@ static uint8_t validate_wire(const uint8_t *p, size_t len, bool response)
         if (type == OGS_PFCP_NODE_ID_TYPE && !node.presence) {
             node.presence = 1; node.data = (void *)(p+4); node.len = n;
         } else if (type == OGS_PFCP_RECOVERY_TIME_STAMP_TYPE && !recovery.presence) {
-            recovery.presence = 1; bad_recovery = n != 4;
+            recovery.presence = 1; bad_recovery = n < 4;
         } else if (type == OGS_PFCP_CAUSE_TYPE && !cause.presence) {
             cause.presence = 1; bad_cause = n != 1;
             if (n) cause.u8 = p[4];

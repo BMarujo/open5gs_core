@@ -1,5 +1,9 @@
 # Dynamic DNN learning: Release 19 review
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 Reviewed on 2026-10-07 (Europe/Lisbon). Documentation revision of stage 1 only;
 no implementation or interoperability pass. Contract: [ADR-001](ADR-001-dynamic-dnn-learning.md).
 Baseline and executed checks: [audit](dynamic-dnn-audit.md).

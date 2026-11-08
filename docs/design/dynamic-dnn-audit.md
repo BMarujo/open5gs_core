@@ -1,5 +1,9 @@
 # Dynamic DNN discovery: stage 1 audit and work status
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 Audited on 2026-10-06 (Europe/Lisbon). Stage 1 is complete as a documentation
 audit with a recorded build blocker. At that audit date, stages 2, 3, 4A, 4B and
 deployment work had **not** been executed. No core source, configuration template,

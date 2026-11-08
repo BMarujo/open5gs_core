@@ -33,7 +33,9 @@ int ogs_pfcp_parse_pool_identity(const ogs_tlv_octet_t *octet,
         return OGS_ERROR;
     p = octet->data;
     n = read_u16(p);
-    if (!n || n != octet->len-2)
+    /* R19 8.1.2 / 8.2.128: the internal length delimits the identity;
+     * unknown trailing extension octets do not belong to that identity. */
+    if (!n || n > octet->len-2)
         return OGS_ERROR;
     *identity = p+2;
     *length = n;
@@ -132,7 +134,7 @@ static int scan_group(const uint8_t *p, size_t len, int *valid,
             if (n != 4) *valid = 0;
             break;
         case OGS_PFCP_IP_VERSION_TYPE:
-            if (!seen_ip++ && (n != 1 || !(p[4] & 3)))
+            if (!seen_ip++ && (!n || !(p[4] & 3)))
                 *valid = 0;
             break;
         default:
@@ -255,6 +257,13 @@ static void copy_known_tlvs(ogs_pkbuf_t *out, ogs_tlv_desc_t *desc,
                     child->ctype == OGS_TLV_UINT8) {
                 keep = first;
                 copied_length = 1;
+            }
+            /* Recovery Time Stamp is extendable (R19 8.1.2 / 8.2.65),
+             * although the legacy numeric descriptor stores only its prefix. */
+            if (type == OGS_PFCP_RECOVERY_TIME_STAMP_TYPE && n >= 4 &&
+                    child->ctype == OGS_TLV_UINT32) {
+                keep = first;
+                copied_length = 4;
             }
         }
         if (keep) {

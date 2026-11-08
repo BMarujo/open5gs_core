@@ -1,10 +1,14 @@
 # Dynamic DNN audit: isolated experiments
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 Date: 2026-10-06. Baseline: `2c80f8f2ba9d378bc845d73fe2fbf4820039fc41`.
 
 This executable documentation does not change the core. Run the Python block
 from the repository root with Python 3 and PyYAML 6.0.3. It compiles an extracted,
-unchanged copy of the two current selector functions against minimal list and
+unchanged copy of the two baseline selector functions against minimal list and
 context adapters in a temporary directory. This is a selector characterization,
 not a daemon, PFCP, allocator, or integration test.
 
@@ -22,7 +26,8 @@ import tempfile
 import yaml
 
 work = Path(tempfile.mkdtemp(prefix="open5gs-dnn-characterization-"))
-source = Path("src/smf/context.c").read_text()
+source = subprocess.check_output(["git", "show",
+    "2c80f8f2ba9d378bc845d73fe2fbf4820039fc41:src/smf/context.c"], text=True)
 selector = source[source.index("static bool compare_ue_info("):
                   source.index("void smf_sess_select_upf(")]
 prefix = r'''

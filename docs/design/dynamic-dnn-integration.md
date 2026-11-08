@@ -1,5 +1,9 @@
 # Stage 5: local integration, images and cluster preparation
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 Historical stage 5 report. **2026-11-04 follow-up:** the introduced ordinary
 peer-return metadata regression was subsequently fixed and tested with repeated
 real NAS sessions, both initiators and later Heartbeat data. See the

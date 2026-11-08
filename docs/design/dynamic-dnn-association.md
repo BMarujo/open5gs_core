@@ -1,5 +1,9 @@
 # Stage 3: PFCP pool advertisement and owned learning
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 Executed on 2026-10-08 (Europe/Lisbon). Scope: Prompt 3 in
 [the plan](../../OPEN5GS_DYNAMIC_DNN_PLAN.md), using
 [ADR-001](ADR-001-dynamic-dnn-learning.md) and the

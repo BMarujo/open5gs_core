@@ -1,18 +1,40 @@
 # Dynamic DNN MVP: local reproduction and isolated cluster runbook
 
+Final source/review: 2026-11-08. Start with the [user guide](dynamic-dnn.md) and
+[final results](dynamic-dnn-final-review.md). The final local bundle below adds
+the extendable-IE correction; the public Helm image and dated cluster campaigns
+predate it. No final-correction publication or rollout was performed. All older
+results retain their original scope. Stage 7 is closed without a PR deliverable.
+The later [IPv6/slice follow-up](dynamic-dnn-ipv6-slices.md) adds local real-NF
+coverage using the same core hash. Its fresh evidence bundle and additional
+isolated runner commands are listed in that report; no Kubernetes action is
+needed for those tests.
+
 Prepared on 2026-10-12; updated on 2026-11-04 for the authorized restart
 and asymmetric Heartbeat recovery corrections. See the [recovery report](dynamic-dnn-pfcp-recovery.md),
 the [restart report](dynamic-dnn-restart-fix.md) and the
 historical [stage 5 report](dynamic-dnn-integration.md) for results and scope.
-Local commands below were exercised in the reported environment. Cluster
-commands are preparation only: Kubernetes admission, networking and UE sessions
-have **NOT RUN**. Executing stage 6 requires a new explicit instruction and an
-identified test context and dedicated namespace. Stage 4B is excluded.
+Local commands below were exercised in the reported environment. At the original
+stage 5, the cluster command templates were preparation only: admission,
+networking and UE sessions had **NOT RUN**. Subsequent executions are recorded
+separately below. New live runs require an explicit instruction and a designated
+test context/namespace. Stage 4B is excluded.
 
 A subsequent explicit instruction authorized public image publication and updates
 to existing SMF/UPF releases. That completed live campaign and its environment
 limitations are recorded in the [cluster report](dynamic-dnn-cluster.md). Its
 Helm-compatible image differs from the earlier minimal images reproduced below.
+
+On 2026-11-08 the user designated the Containernet/K3s emulation. The full matrix
+with Gradiant 2.8.0 ancillary NFs, isolated discovery/database, bidirectional
+namespace isolation and actual DN N6 return traffic passed. See the
+[Prompt 6 report](dynamic-dnn-containernet.md). Its executable fixtures are
+`open5gs_k8s/deployments-containernet/open5gs/dynamic-dnn/run.py` and `analyze.py`,
+with their adjacent README. They use only the designated topology wrappers and
+a fresh owned namespace; the old minimal-image command templates below are
+retained for reproducing their historical bundle. Lab cleanup was executed with
+UID preconditions. Normal Containernet installation was a separate authorized
+integration check and was left running; it is not removed by lab rollback.
 
 ## Inputs and local reproduction
 
@@ -21,7 +43,9 @@ on the host and enough space for the source, full build and evidence. Never use
 host networking or an existing MongoDB. The runner creates its own network
 namespace and tmpfs MongoDB, and removes only its recorded container IDs.
 
-The recovery evidence bundle is `/home/marujo/open5gs_pfcp_recovery_results_20261104`.
+The final local evidence/source bundle is
+`/home/marujo/open5gs_final_review_20261108T154719Z`.
+The earlier recovery bundle is `/home/marujo/open5gs_pfcp_recovery_results_20261104`.
 The prior `/home/marujo/open5gs_dnn_restart_results_20261104` and original
 `/home/marujo/open5gs_stage5_results_20261011` remain unchanged;
 their older images/source do not contain the latest asymmetric recovery correction.
@@ -32,14 +56,14 @@ The runtime, compiler/tools and minimal nftables helper images are exported as s
 archives. The archives are local artifacts, not registry publications.
 
 ```sh
-bundle=/home/marujo/open5gs_pfcp_recovery_results_20261104
+bundle=/home/marujo/open5gs_final_review_20261108T154719Z
 cd "$bundle"
 sha256sum -c SHA256SUMS
 docker load -i open5gs-dnn-toolchain-image.tar
 docker load -i open5gs-dynamic-dnn-images.tar
 docker load -i open5gs-pfcp-nettools-image.tar
-docker image inspect open5gs-smf:2c80f8f2ba9d-dirty-0d6a194893d6
-docker image inspect open5gs-upf:2c80f8f2ba9d-dirty-0d6a194893d6
+docker image inspect open5gs-smf:78f91ae6e567-dirty-d8e528dfc3ab
+docker image inspect open5gs-upf:78f91ae6e567-dirty-d8e528dfc3ab
 # Required once if this exact MongoDB image is not already local:
 docker pull mongo@sha256:8c3ce64d1a433bf57ea79035b48a38ea3e532997a1328fe3266e2e2e8bfb41b6
 ```

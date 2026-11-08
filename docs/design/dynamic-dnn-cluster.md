@@ -1,5 +1,13 @@
 # Helm image publication and Kubernetes validation
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
+Follow-up on 2026-11-05: the remaining nine core NFs were aligned to Gradiant
+2.8.0 and revalidated. See [the version alignment report](dynamic-dnn-version-alignment.md).
+The mixed-version state below records the original 2026-11-04 campaign.
+
 2026-11-04. The user explicitly authorized committing/pushing the implementation,
 publishing a public Docker Hub image and updating the existing SMF/UPF Helm
 workloads. This supersedes earlier publication/deployment restrictions. Stage 4B
@@ -139,4 +147,6 @@ subscriber deletion required both exact IDs and the run's ownership tag.
 
 The authorized build, public publication and live validation are complete for
 the available workers. Remaining edge-1 runtime validation needs that worker or
-an explicitly revised placement. Stage 7 review/PR preparation has not started.
+an explicitly revised placement. At this campaign's date, final review had not
+started. It is now closed in the [final report](dynamic-dnn-final-review.md);
+the user subsequently withdrew the PR deliverable.

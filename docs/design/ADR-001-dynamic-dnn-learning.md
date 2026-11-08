@@ -3,13 +3,21 @@
 Date: 2026-10-06; Release 19 revision: 2026-10-07; stage 3: 2026-10-08;
 stage 4A: 2026-10-11; stage 5: 2026-10-11–12.
 Feature regression and asymmetric recovery corrections: 2026-11-04.
-Status: stages 2, 3 and 4A implemented and validated for the documented scope.
-Advertisement, owned learning and legacy selection integration are implemented.
-Stage 5 local integration and image preparation were delivered with explicit
-recovery and baseline error FAILs. Strict selection (4B) has not started.
-Stage 6 was subsequently authorized on 2026-11-04: public Helm-compatible image
-and live validation on available workers passed, with an existing unavailable
-edge worker remaining blocked. See the [cluster report](dynamic-dnn-cluster.md).
+Final review: 2026-11-08. Status: MVP implemented; stages 1–7 delivered for the
+documented scope. Strict selection (4B) is not implemented. The physical cluster
+campaign, 2.8.0 NF alignment and isolated Containernet/K3s N6 campaign passed
+their named checks; the physical unavailable worker remains an environment limit.
+The final review corrected extendable-IE handling and repeated isolated build,
+sanitizer and real-NF regressions. That last source correction has local images
+but is not in the earlier public image or cluster campaign. No new publication,
+push, deployment or PR was performed during stage 7.
+Current entry point: [user guide](dynamic-dnn.md),
+[final review and image boundary](dynamic-dnn-final-review.md),
+[executed clause matrix](dynamic-dnn-conformance-matrix.md).
+Further local validation of IPv6-only/dual-stack NAS/GTP and existing slice
+behavior passed with learning off/on and both initiators, with no further core
+change. See the [IPv6/slice report](dynamic-dnn-ipv6-slices.md); it does not add
+slice-aware UPF selection or change the local restriction policy.
 The introduced late-Heartbeat invalidation regression was subsequently fixed;
 see [correction and new evidence](dynamic-dnn-restart-fix.md). Historical stage
 results below retain their original scope and dates.
@@ -28,9 +36,9 @@ Prepared isolated validation/rollback: [runbook](dynamic-dnn-runbook.md).
 
 ## Context and scope
 
-An incoming Setup already creates a PFCP peer, but does not populate its DNN
-mapping. Today SMF selection obtains that mapping from YAML. We will advertise
-actual configured UPF pools and project learned metadata into the DNN arm of
+In the original baseline, incoming Setup created a PFCP peer without populating
+its DNN mapping; SMF obtained that mapping from YAML. This fork advertises
+actual configured UPF pools and projects learned metadata into the DNN arm of
 the existing selector. SMF services, subscriptions and address allocation stay
 operator provisioned. No stage 4B, API/SUPI policy, orchestrator, deployment wait,
 session migration, NRF discovery or Association Update implementation is included.
@@ -69,7 +77,10 @@ selection does not implement every S1 §6.3.3.3 requirement, including required
 UPF functionalities received from UDM. The controlled MVP assumes no additional
 such requirements; it must not be presented as satisfying those deployments.
 
-| Subject | S2 clause/table; nature | Design decision | Future evidence |
+The table below retains the original test IDs. Actual executed scope and source
+identities are maintained in the [final clause matrix](dynamic-dnn-conformance-matrix.md).
+
+| Subject | S2 clause/table; nature | Design decision | Original test IDs |
 |---|---|---|---|
 | Both Setup directions | §6.2.6.2–3; §7.4.4.1–2; optional | UP builders advertise in request and successful response | T05/T06 |
 | Pool group | Table 7.4.4.1-3; required/optional children | Preserve nesting and all supported repeated children | T02/T03/T21 |
@@ -85,12 +96,12 @@ such requirements; it must not be presented as satisfying those deployments.
 
 ## Decision 1: independent local controls
 
-The following names are **new proposed options**, absent from this HEAD:
+The following independent options and field were implemented in stage 3:
 
 ```yaml
 upf:
   pfcp:
-    advertise_ue_ip_pools: true   # proposed, default false
+    advertise_ue_ip_pools: true   # default false
     client:
       smf:
         - address: 127.0.0.4
@@ -98,10 +109,10 @@ upf:
     - subnet: 10.48.0.0/16
       gateway: 10.48.0.1
       dnn: edge1
-      pool_id: edge1-v4-a        # proposed field
+      pool_id: edge1-v4-a        # persistent configured identity
 ```
 
-SMF independently opts in with proposed `smf.pfcp.learn_upf_dnn: true`
+SMF independently opts in with `smf.pfcp.learn_upf_dnn: true`
 (default false). This changes the source of the DNN comparison only. It is
 neither the UPF advertisement switch nor a strict selection switch. SGW-C/SGW-U
 do not implicitly opt in through their shared PFCP library. Feature-off parsing
@@ -409,7 +420,34 @@ normal/instrumented recovery now exercise that path. See the report for actual
 NAS first-request evidence, raw FAILs, the narrowly suppressed baseline talloc
 startup leak and remaining NOT RUN boundaries.
 
-## Change map and next-stage gates
+## Decision 8: preserve known prefixes of extendable IEs
+
+The final review checked S2 §8.1.2 and the individual IE figures against the
+pinned DOCX. Types 177, 258, 60 and 96 are extendable. Exact-length validation
+introduced in stages 2/3 could omit valid pool data or reject Setup solely for
+unknown extension octets. Identity now requires its internal length to fit the
+available value and returns exactly those identity bytes; IP Version accepts its
+known flag octet plus extensions. IPv4/IPv6 Node ID accepts a complete address
+plus extensions. Recovery Timestamp validation accepts its four-byte prefix;
+the PFCP adapter copies that prefix to the legacy numeric descriptor. FQDN
+validation remains the existing variable-length profile. Fixed Cause and
+four-byte S-NSSAI retain exact-length validation. Truncations remain invalid.
+
+Independent byte tests fail before this correction and pass afterward, including
+both Setup directions, IPv4/IPv6 Node IDs and owned learned pool fields. TShark
+4.2.2 independently decodes the known prefixes and labels extension bytes
+undecoded. The generator and its caches need no changes for this correction and
+fresh/cached output was verified. This is a scoped forward-compatibility fix,
+not an implementation of every future IE extension. See the final report for
+build, sanitizer, regression and unpublished local-image evidence.
+
+## Historical change map and stage gates
+
+The chronological stage summaries below describe their original stopping points.
+Their then-open restart/Heartbeat failures were superseded by Decisions 6/7;
+cluster and N6 NOT RUN entries were superseded by the dated stage 6 reports.
+They do not describe the final project status. Use the final review and clause
+matrix above for current implemented/tested/pending distinctions.
 
 | Stage | Files/areas | Required result |
 |---|---|---|

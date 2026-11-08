@@ -1,5 +1,10 @@
 # Open5GS image for Gradiant Helm charts
 
+Current source and publication boundary:
+[final review](../../docs/design/dynamic-dnn-final-review.md). The image digest
+recorded below predates the final extendable-IE correction. Current local SMF/UPF
+test images are not a new publication of this Helm-compatible image.
+
 This image contains all Open5GS NF executables from one source snapshot. The
 chart chooses the daemon per Pod. It supplies Bash, iproute2, iptables and the
 capture/probe tools used by Gradiant's UPF init container and probes. Configuration
@@ -37,3 +42,23 @@ Anonymous manifest access and actual Kubernetes imageIDs were verified.
 Gradiant umbrella chart 2.3.4 required no template modifications. See
 [the cluster report](../../docs/design/dynamic-dnn-cluster.md) for exact scope,
 first-request evidence, mixed-version SBI refresh and the unavailable edge worker.
+
+To build a fresh local Helm image, use a new context with `source/` from the
+verified final source archive (or `prepare-build.py` with its pinned Git vendors).
+Copy this Dockerfile and `entrypoint.sh` to that context root. Read the full
+core hash and revision from its recorded `source-identity.json`; include the
+dirty patch in the source archive when the revision is uncommitted.
+
+```sh
+docker build --pull=false \
+  --build-arg TOOLCHAIN_IMAGE=sha256:7e59045bafddbee78b43ed533388cde5da77da3a5b80c807ac2f2f561013a551 \
+  --build-arg REVISION=78f91ae6e5674503c766991e0d8cd10c515869b6 \
+  --build-arg CODE_SHA256=d8e528dfc3abe4c66856b8f75e364d8bac1758eebbff2b61ab9c52781bf5242c \
+  -t open5gs-helm:78f91ae6e567-dirty-d8e528dfc3ab /path/to/fresh-context
+```
+
+This command is prepared for the final source, not reported as executed here.
+Compilation/tests execute in the Dockerfile; runtime packages need network
+access and are not version-locked. Record the resulting image ID and verify its
+tools/configuration/privileges before choosing a tag/digest for a rollout.
+Publication and Helm upgrade are separate actions; no push is included above.

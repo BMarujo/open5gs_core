@@ -5,6 +5,64 @@ Plano de desenvolvimento e prompts sequenciais para Codex no VS Code.
 Preparado em 5 de outubro de 2026; atualizado após as etapas autorizadas abaixo.
 Este documento contém o plano e o estado das entregas, sem certificação de conformidade.
 
+## Estado final — Prompt 7, 8 de novembro de 2026
+
+MVP das etapas 1–7 concluído para o âmbito documentado: anúncio de pools/DNNs
+por PFCP, aprendizagem owned e utilização pelo seletor legacy. A etapa 4B
+permanece excluída. A pedido do utilizador, não existe entrega de PR/rascunho
+upstream; o fecho inclui um mapa interno coerente das alterações.
+
+Revisão contra `2c80f8f2ba9d378bc845d73fe2fbf4820039fc41`, mantendo `main`,
+HEAD `78f91ae6e5674503c766991e0d8cd10c515869b6` e versão declarada 2.8.0.
+Preservadas as alterações locais herdadas. A revisão corrigiu validação demasiado
+restritiva de IEs extensíveis 177/258/60/96 segundo TS 29.244 V19.5.0 §8.1.2 e
+as figuras individuais; IEs fixos continuam com comprimento exato. Corrigida
+também a captura dos harnesses em diretórios privados, sem relaxar permissões.
+
+PASS: compilação completa isolada; core/crypt/unit/smf-selection; 9 casos codec,
+10 associação e 6 seletor (incluindo 6 144 comparações legacy); ASan/UBSan sem
+supressões nas suites dirigidas; regeneração fresh/cached e 28 caches idênticos;
+7 cenários de associação, 15 de configuração e 14 de seleção; NAS/N4/GTP-U com
+ambos os iniciadores e retorno C/B/C/B; perda assimétrica, perda simultânea e
+perda breve de Heartbeat; regressões 5GC/EPC; imagens locais e smoke PFCP.
+Os bytes independentes da correção são descodificados por TShark 4.2.2.
+
+O fallback legacy DNN OU localização e os fallbacks existentes permanecem.
+O erro de rejeição Session Establishment já presente na base continua registado
+como FAIL protocolar, com no-match caracterizado separadamente dos positivos.
+Não há falhas finais abertas nas verificações executadas da implementação nova.
+
+A imagem pública e os testes anteriores do cluster/Containernet são evidência
+do MVP antes da última correção de extensões. A correção final tem imagens locais
+e novos testes isolados; **publicação e rollout dessa revisão não foram feitos**.
+Não houve novo deployment, commit, push ou PR nesta etapa. IPv6/slices NAS/N6,
+outros vendors, carga/soak e a campanha no worker físico indisponível continuam
+NOT RUN; 4B é NOT RUN (optional). Não é alegada conformidade integral Release 19.
+
+Documentação canónica em inglês:
+
+- [Guia de configuração e operação](docs/design/dynamic-dnn.md).
+- [Revisão final, mapa de alterações, evidências e limitações](docs/design/dynamic-dnn-final-review.md).
+- [Matriz cláusula → comportamento → teste → evidência](docs/design/dynamic-dnn-conformance-matrix.md).
+
+As secções cronológicas seguintes preservam o estado na data de cada etapa;
+os respetivos bloqueios/NOT RUN antigos não substituem este estado final.
+
+### Validação local adicional IPv6/slices — 8 de novembro de 2026
+
+A pedido do utilizador, executada sem aceder ao Kubernetes. PASS: testes existentes
+de registo dual stack, slices same/different DNN e EPC IPv6; funcionalidade off
+e aprendizagem ativa com ambos os iniciadores. Dez invocações / treze casos ABTS.
+PASS adicional: seis sessões novas (IPv6-only, dual stack e IPv4, por iniciador),
+primeiro N4 correto e zero retransmissões, doze pares ICMPv6 por GTP-U e anúncios
+de família descodificados independentemente. Não foi necessário corrigir o core;
+hash mantém-se `d8e528dfc3ab…`. Só foram acrescentados testes/documentação.
+
+O NOT RUN anterior de IPv6 NAS/data fica superado para este laboratório local.
+Permanecem sem teste DN IPv6 externo, transportes N4/N3 IPv6, NAS com anúncios
+PFCP restritos por slice e estes cenários no cluster. A política de slices e o
+fallback legacy não foram alterados. [Relatório e reprodução em inglês](docs/design/dynamic-dnn-ipv6-slices.md).
+
 ## Estado após a auditoria de 6 de outubro de 2026
 
 Revisão normativa em 7 de outubro de 2026: o contrato usa agora **Release 19,
@@ -28,6 +86,8 @@ Documentação em inglês:
 - [Correção de 4 de novembro: mappings após restart/Heartbeat e novas evidências](docs/design/dynamic-dnn-restart-fix.md).
 - [Recuperação após perda assimétrica de Heartbeats e ownership de eventos](docs/design/dynamic-dnn-pfcp-recovery.md).
 - [Etapa 6: imagem pública, Helm e validação real no cluster](docs/design/dynamic-dnn-cluster.md).
+- [Alinhamento das restantes NFs com Gradiant 2.8.0 e validação de 5 de novembro](docs/design/dynamic-dnn-version-alignment.md).
+- [Prompt 6: matriz isolada Containernet/K3s e retorno N6, 8 de novembro](docs/design/dynamic-dnn-containernet.md).
 
 A regeneração da etapa 1 com caches existentes e vazios passou, reproduzindo o codec original (incluindo os bugs). A caracterização de duas funções extraídas do seletor passou em 8 asserts. O modelo de identidade passou entre processos novos; o teste de reinício real da UPF fica para a etapa 3. Nessa auditoria, a baseline completa Meson ficou bloqueada por `talloc` ausente; esse impedimento foi superado no ambiente isolado da etapa 2. Estes resultados da etapa 1 não validavam uma feature implementada.
 
@@ -255,7 +315,33 @@ NOT RUN ambiental: SMF/UPFs edge-1 no worker já NotReady; templates foram atual
 mas não se mudou placement nem se forçou a limpeza dos Pods antigos. As quatro
 workloads disponíveis SMF/UPF ficaram Ready. 4B continua NOT RUN (optional).
 Relatório inglês e evidência em `open5gs_cluster_results_20261104T154429Z`.
-Etapa 7, publicação de PR e reparação do worker não foram iniciadas.
+Na data deste relatório, etapa 7 e reparação do worker não tinham sido iniciadas.
+A etapa 7 foi entretanto concluída; publicação de PR foi retirada do âmbito.
+
+### Prompt 6 concluído no Containernet/K3s — 8 de novembro de 2026
+
+Executada a matriz dinâmica com as restantes NFs em Gradiant 2.8.0, num core
+completo e MongoDB próprios em namespace dedicado. PASS: isolamento de descoberta,
+IE 233 e aprendizagem sem mappings estáticos por peer, adição B/C com sessões em
+A/B, rotação legacy, perda e regresso automático de C com pool ID persistente,
+uso após Heartbeats e SMF com UID/PID constantes e zero reinícios. Doze sessões
+positivas tiveram primeiro N4 correto e zero retransmissões. Cinquenta e sete
+verificações de dados correlacionam GTP/TEIDs, saída N6 e respostas nas três DNs
+reais da emulação; oito capturas têm zero drops. Não foi só echo ao gateway UPF.
+
+O caso sem match preserva fallback/rejeição legacy; uma nova tentativa NAS
+automática foi identificada separadamente dos retries PFCP. Fixtures e falhas
+intermédias corrigidas ficaram preservadas. Cleanup por ownership/UID removeu o
+laboratório e os sniffers. Depois foi instalada a configuração normal atualizada,
+com Multus e 11 NFs Ready, sem alterar a árvore/cluster físico. A emulação e esse
+core normal ficaram ativos. Os profiles edge/TAC4 foram adaptados e passaram
+validação estática; não se alegam campanhas live desses profiles.
+
+Relatório inglês acima; evidência em
+`open5gs_containernet_dnn_results_20261108T073927Z/attempt-04/analysis-04`.
+4B continua NOT RUN (optional); IPv6, roaming, carga e cenários além do MVP ficam
+fora desta campanha. Não houve alteração de comportamento do core, commit/push,
+publicação de nova imagem ou avanço automático para a etapa 7.
 
 ## 1. Resultado pretendido
 
@@ -326,21 +412,21 @@ A etapa 3 implementou anúncio, metadados owned e validação/transições de as
 10. Os caches do gerador marcam os campos de Association como UE IP Address (93) e `tlv_more: 0`/`max_tlv_more: 0`, apesar de a norma permitir vários IE 233. A correção tem de abranger tipo, nesting e multiplicidade, não apenas renomear a struct gerada.
 11. No estado inicial da SMF, `src/smf/pfcp-sm.c` chama os handlers de Association Setup e transita para `associated` sem usar o valor booleano devolvido. Uma associação rejeitada não pode transitar para `associated` nem publicar um snapshot novo. Isto não transforma o fallback legacy numa garantia de elegibilidade estrita. Os handlers CP/UP também ignoram Cause nas respostas e enviam Request Accepted antes da validação completa; os callers ignoram resultados na reassociação. Erro semântico num IE opcional não implica rejeição da associação.
 
-## 3. Contrato funcional proposto
+## 3. Contrato funcional do MVP
 
-Estas são decisões propostas de implementação, a validar e registar no prompt 1; não são exigências adicionais inventadas da 3GPP.
+Estas decisões foram validadas na auditoria e implementadas nas etapas 2–4A, com as correções posteriores do ADR. São políticas de implementação, não exigências adicionais da 3GPP. A secção 3.3 continua opcional e não implementada.
 
 ### 3.1 Anúncio e representação
 
 - Trabalhar com pools reais configuradas na UPF e os respetivos DNNs explícitos.
 - Validar o uso do IE 233 para este modelo antes de programar. Não o tratar como um contentor arbitrário de strings.
-- Acrescentar o campo proposto `upf.session[].pool_id`: string explícita de 1–64 bytes ASCII `[A-Za-z0-9._:-]`, única nas entradas anunciadas da UPF. Este limite é política local, não o máximo normativo do IE 177. Persistir a identidade no YAML e emitir os mesmos bytes em cada arranque; nunca derivar de DNN, posição, endereço N4, relógio ou hash aleatório. Uma alteração explícita é uma substituição válida. Sem histórico persistente não é possível detetar uma alteração acidental entre reinícios; não rejeitar «instabilidade» indetetável. Testar identidade igual com o mesmo YAML, reordenação e mudança N4, e substituição com edição explícita (T24).
+- Acrescentar o campo `upf.session[].pool_id`: string explícita de 1–64 bytes ASCII `[A-Za-z0-9._:-]`, única nas entradas anunciadas da UPF. Este limite é política local, não o máximo normativo do IE 177. Persistir a identidade no YAML e emitir os mesmos bytes em cada arranque; nunca derivar de DNN, posição, endereço N4, relógio ou hash aleatório. Uma alteração explícita é uma substituição válida. Sem histórico persistente não é possível detetar uma alteração acidental entre reinícios; não rejeitar «instabilidade» indetetável. Testar identidade igual com o mesmo YAML, reordenação e mudança N4, e substituição com edição explícita (T24).
 - Exemplo de schema pretendido, sujeito à auditoria do parser do HEAD:
 
   ```yaml
   upf:
     pfcp:
-      advertise_ue_ip_pools: true  # opção proposta, default false
+      advertise_ue_ip_pools: true  # default false
     session:
       - subnet: 10.48.0.0/16
         gateway: 10.48.0.1
@@ -348,7 +434,7 @@ Estas são decisões propostas de implementação, a validar e registar no promp
         pool_id: edge1-v4-a
   ```
 
-- Separar a opção proposta `upf.pfcp.advertise_ue_ip_pools` (default false) de `smf.pfcp.learn_upf_dnn` (default false). A primeira controla emissão; a segunda controla utilização do mapping aprendido. Nenhuma ativa seleção estrita. Não aplicar automaticamente às NFs EPC que partilham a biblioteca.
+- Separar a opção `upf.pfcp.advertise_ue_ip_pools` (default false) de `smf.pfcp.learn_upf_dnn` (default false). A primeira controla emissão; a segunda controla utilização do mapping aprendido. Nenhuma ativa seleção estrita. Não aplicar automaticamente às NFs EPC que partilham a biblioteca.
 - No anúncio do MVP, uma pool anunciada deve ter DNN explícito. Uma entrada `session` com DNN vazio não deve ser anunciada como wildcard nem interpretada como suporte universal. Suporte futuro para pools genéricas exige uma semântica separada e testes próprios.
 - O anúncio não transporta uma cópia completa do YAML da UPF. O endereço N3 é tratado pelo mecanismo existente de túneis; não acrescentar um endereço GTP-U fictício ao grupo 233.
 - Não alterar capacidades UEIP/FTUP para tornar o anúncio aparente ou artificialmente válido. O allocator permanece no CP neste MVP.
@@ -470,7 +556,7 @@ As repetições provam ausência de encaminhamento incorreto nos casos testados,
 
 Guardar este documento no fork como `OPEN5GS_DYNAMIC_DNN_PLAN.md`. Executar os prompts por ordem na extensão Codex, saltando 4B salvo autorização explícita para a hardening opcional. Uma etapa está concluída quando o seu critério de saída foi verificado, ou quando a limitação está explicitamente registada. O envio do prompt seguinte autoriza essa etapa; o prompt de auditoria não autoriza alterações funcionais.
 
-Os nomes de ficheiros de documentação abaixo são sugestões. Adaptar à organização do repositório e manter um índice. Texto para potencial upstream em inglês; explicações ao utilizador podem ser em português.
+Os nomes de ficheiros de documentação abaixo são sugestões. Adaptar à organização do repositório e manter um índice. Documentação reutilizável em inglês; explicações ao utilizador podem ser em português. A entrega final não inclui PR upstream.
 
 Não é obrigatório ter acesso ao cluster para concluir auditoria, codec, lógica e testes locais. Se faltarem privilégios ou ferramentas, registar o impedimento e continuar o trabalho independente; não apresentar comandos preparados como testes executados.
 
@@ -582,7 +668,7 @@ Critério de saída: testes locais reprodutíveis e uma imagem identificável, o
 ### Prompt 6 — Testar no Kubernetes/K3s de forma isolada
 
 ```text
-Executa a etapa 6 de OPEN5GS_DYNAMIC_DNN_PLAN.md. O objetivo é validar no meu cluster a feature implementada no upstream. Os ficheiros de emulação/deployment são fixtures de validação, não a implementação da feature.
+Executa a etapa 6 de OPEN5GS_DYNAMIC_DNN_PLAN.md. O objetivo é validar no meu cluster a feature implementada no fork do core. Os ficheiros de emulação/deployment são fixtures de validação, não a implementação da feature.
 
 1. Lê o runbook e os resultados anteriores. Confirma o contexto Kubernetes de teste e o namespace dedicado que eu indicar. Se ainda não estiverem identificados, prepara os manifests/comandos e pede apenas esses valores antes de os aplicar. Não uses o contexto atual implicitamente para modificar a instalação existente.
 2. Inspeciona de forma read-only a rede/Multus/N4/N3/N6, recursos, permissões e ferramentas de captura relevantes. Define endereços/pools sem colisões com as NFs existentes e isolamento da descoberta das NFs de teste. Não reinicies nós, não limpes iptables e não substituas a minha SMF normal.
@@ -597,7 +683,7 @@ Se não houver acesso/NET_ADMIN/captura, declara exatamente o que não foi execu
 
 Critério de saída: associação e primeiro pedido de sessão comprovados no cluster, sem reinício da SMF; resultados e rollback verificáveis. O utilizador pode executar esta etapa depois das anteriores.
 
-### Prompt 7 — Revisão final e documentação para upstream
+### Prompt 7 — Revisão final e documentação do projeto
 
 ```text
 Executa a etapa 7. Faz uma revisão do diff completo contra o commit de base e fecha a documentação. Não faças push nem publiques PR.
@@ -607,8 +693,8 @@ Executa a etapa 7. Faz uma revisão do diff completo contra o commit de base e f
 3. Produz documentação em inglês com: problema e comportamento anterior; versão/commit; desenho e opções novas; exemplo completo UPF/SMF; mapping runtime com seleção legacy; modo estrito apenas se implementado; formato PFCP; precedência static/learned; ciclo de vida; uso com ambos os iniciadores; erros e diagnóstico; precondições de IP/N6; instalação de imagens; testes e resultados; rollback; limitações e trabalho futuro.
 4. Atualiza a matriz normativa com links, versões, cláusulas, decisões e testes/evidência. Distingue confirmed in code, specified behavior, implementation policy e not experimentally verified. Não escrevas «3GPP certified» ou conformidade global.
 5. Mantém explícito que adicionar peers por associação não é hot reload de YAML, descoberta NRF, criação dinâmica de DNNs ou seleção por SUPI. Documenta as restrições do MVP e as diferenças entre associação, elegibilidade e sessão estabelecida.
-6. Separa documentação reutilizável upstream de IPs, nomes e observações específicos do meu laboratório. Não adiciones pcaps volumosos ou dados reais ao PR; usa fixtures mínimas e manifest de evidências.
-7. Prepara uma descrição de PR e uma proposta de divisão em commits/PRs revistos: codec, capabilities, seleção/testes/docs; bugs independentes separados. Explica por que a alteração é necessária, comportamento resultante, testes executados e limitações. Não prometas aceitação pelos maintainers.
+6. Separa documentação reutilizável de IPs, nomes e observações específicos do meu laboratório. Mantém pcaps volumosos e dados reais fora de Git; usa fixtures mínimas e manifest de evidências.
+7. Produz um mapa interno coerente das alterações: codec/geração, capacidades, seleção/testes/docs e correções protocolares independentes. Explica necessidade, comportamento, testes e limitações. Não prepares PR, não reescrevas o histórico e não faças commit/push ou publicação.
 
 Entrega um checklist final com implementado, testado, pendente, riscos concretos e comandos reproduzíveis. Identifica qualquer gate por cumprir; não marques testes de cluster preparados como executados.
 ```
@@ -637,7 +723,7 @@ Manter um índice com, pelo menos:
 - configuração e guia de utilização;
 - matriz de testes, resultados e limitações;
 - runbook local/cluster e rollback;
-- rascunho de PR.
+- revisão final e mapa interno das alterações (sem entrega de PR).
 
 Cada execução deve guardar data, commit/diff, comando, exit status, versões das ferramentas, identidade das imagens e paths de artefactos. Um relatório sem capturas pode comprovar testes unitários; não deve alegar ter observado tráfego PFCP/GTP-U.
 

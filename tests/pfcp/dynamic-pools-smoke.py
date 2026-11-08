@@ -157,10 +157,10 @@ def smf_config(active=False, learn=True):
 
 
 try:
-    capture = subprocess.Popen(['tshark', '-i', 'lo', '-f', 'udp port 8805', '-w',
-                                str(OUT / 'association.pcapng')],
-                               stdout=subprocess.DEVNULL,
-                               stderr=(OUT / 'tshark.log').open('w'))
+    with (OUT / 'association.pcapng').open('wb') as capture_output:
+        capture = subprocess.Popen(['tshark', '-i', 'lo', '-f', 'udp port 8805',
+                                    '-w', '-'], stdout=capture_output,
+                                   stderr=(OUT / 'tshark.log').open('w'))
     time.sleep(.3)
     # Real SMF + real UPF, both initiators. Learning is observed in the real NF
     # event loop after publication, without exposing a production test API.

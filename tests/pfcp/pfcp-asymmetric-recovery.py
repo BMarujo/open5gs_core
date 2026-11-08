@@ -72,8 +72,9 @@ upf_cfg={'global':global_cfg,'upf':{'time':{'message':{'duration':retry_ms}},
     'session':[{'subnet':'10.48.0.0/24','gateway':'10.48.0.1','dnn':'edge1','pool_id':'edge1-a','dev':'pooltest'}]}}
 if initiator=='up':upf_cfg['upf']['pfcp']['client']={'smf':[{'address':'127.0.0.4'}]}
 else:smf_cfg['smf']['pfcp']['client']={'upf':[{'address':'127.0.0.7'}]}
-capture=subprocess.Popen(['tshark','-i','lo','-f','udp port 8805','-w',str(out/'n4.pcapng')],
-                         stdout=subprocess.DEVNULL,stderr=(out/'capture.log').open('w'))
+with (out/'n4.pcapng').open('wb') as capture_output:
+    capture=subprocess.Popen(['tshark','-i','lo','-f','udp port 8805','-w','-'],
+                             stdout=capture_output,stderr=(out/'capture.log').open('w'))
 time.sleep(.4)
 status=1; result={}
 try:

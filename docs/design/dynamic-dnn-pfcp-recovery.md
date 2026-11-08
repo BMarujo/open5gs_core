@@ -1,5 +1,9 @@
 # PFCP recovery after asymmetric Heartbeat loss
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 2026-11-04. Authorized follow-up to the dynamic DNN MVP and
 [restart correction](dynamic-dnn-restart-fix.md). No stage 4B or cluster work.
 HEAD remains `2c80f8f2ba9d378bc845d73fe2fbf4820039fc41`, branch `main`,

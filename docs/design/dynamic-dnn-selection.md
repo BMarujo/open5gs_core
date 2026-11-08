@@ -1,5 +1,9 @@
 # Stage 4A: learned DNN mappings in the legacy SMF selector
 
+Current project status: [final review](dynamic-dnn-final-review.md) and
+[operation guide](dynamic-dnn.md). This dated report preserves the results and
+limits at its execution date; later corrections/validation do not rewrite it.
+
 Executed on **2026-10-11**, user timezone Europe/Lisbon. Prompt 4A in
 [the plan](../../OPEN5GS_DYNAMIC_DNN_PLAN.md) is complete for the scope below.
 Contract: [ADR-001](ADR-001-dynamic-dnn-learning.md). Previous evidence:
