@@ -1,9 +1,11 @@
 # Open5GS image for Gradiant Helm charts
 
-Current source and publication boundary:
-[final review](../../docs/design/dynamic-dnn-final-review.md). The image digest
-recorded below predates the final extendable-IE correction. Current local SMF/UPF
-test images are not a new publication of this Helm-compatible image.
+Current publication: `docker.io/bmarujo/open5gs:dnn-384a54f4d9a0`, digest
+`sha256:a05e25b5cc4e39defa42b87fed82bcd0ace632ce477a53059f6ebee6fdffdb8b`.
+It contains the final extendable-IE correction and IPv6/slice test updates from
+commit `384a54f4d9a0096e12fd1d231df8a2e2b524dd4a`. Build tests and anonymous
+registry retrieval passed. Rollout/performance evidence is recorded separately
+in the project documentation; publication alone is not deployment validation.
 
 This image contains all Open5GS NF executables from one source snapshot. The
 chart chooses the daemon per Pod. It supplies Bash, iproute2, iptables and the
@@ -50,15 +52,21 @@ core hash and revision from its recorded `source-identity.json`; include the
 dirty patch in the source archive when the revision is uncommitted.
 
 ```sh
+docker tag sha256:7e59045bafddbee78b43ed533388cde5da77da3a5b80c807ac2f2f561013a551 \
+  open5gs-pfcp-toolchain:sha256-7e59045bafdd
+test "$(docker image inspect --format '{{.Id}}' open5gs-pfcp-toolchain:sha256-7e59045bafdd)" \
+  = sha256:7e59045bafddbee78b43ed533388cde5da77da3a5b80c807ac2f2f561013a551
 docker build --pull=false \
-  --build-arg TOOLCHAIN_IMAGE=sha256:7e59045bafddbee78b43ed533388cde5da77da3a5b80c807ac2f2f561013a551 \
-  --build-arg REVISION=78f91ae6e5674503c766991e0d8cd10c515869b6 \
+  --build-arg TOOLCHAIN_IMAGE=open5gs-pfcp-toolchain:sha256-7e59045bafdd \
+  --build-arg REVISION=384a54f4d9a0096e12fd1d231df8a2e2b524dd4a \
   --build-arg CODE_SHA256=d8e528dfc3abe4c66856b8f75e364d8bac1758eebbff2b61ab9c52781bf5242c \
-  -t open5gs-helm:78f91ae6e567-dirty-d8e528dfc3ab /path/to/fresh-context
+  -t bmarujo/open5gs:dnn-384a54f4d9a0 /path/to/fresh-context
 ```
 
-This command is prepared for the final source, not reported as executed here.
-Compilation/tests execute in the Dockerfile; runtime packages need network
-access and are not version-locked. Record the resulting image ID and verify its
+This form was executed for the current publication, using a verified fresh
+source/vendor context. A bare `sha256:<config-id>` in BuildKit FROM is interpreted
+as an image repository, so the verified local tag is required. Compilation/tests
+execute in the Dockerfile; runtime packages need network access and are not
+version-locked. Record the resulting image ID and verify its
 tools/configuration/privileges before choosing a tag/digest for a rollout.
 Publication and Helm upgrade are separate actions; no push is included above.

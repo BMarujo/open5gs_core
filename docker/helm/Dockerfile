@@ -1,6 +1,7 @@
 # Context: source/ is the recorded checkout plus the two pinned Meson vendors.
 # The toolchain image is exported with the local validation evidence; its ID is
-# recorded in the build evidence; pin TOOLCHAIN_IMAGE to that ID when rebuilding.
+# recorded in the build evidence; verify the local TOOLCHAIN_IMAGE tag resolves
+# to that ID before rebuilding (BuildKit FROM does not accept a config ID).
 # Compilation happens here, never on a Kubernetes node.
 ARG TOOLCHAIN_IMAGE=open5gs-pfcp-codec-build:20261007
 ARG RUNTIME_IMAGE=ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852

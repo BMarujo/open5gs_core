@@ -11,6 +11,15 @@ The final review corrected extendable-IE handling and repeated isolated build,
 sanitizer and real-NF regressions. That last source correction has local images
 but is not in the earlier public image or cluster campaign. No new publication,
 push, deployment or PR was performed during stage 7.
+Subsequent authorized delivery completed: source `384a54f4d9a`, public digest
+`sha256:a05e25b5cc4e39defa42b87fed82bcd0ace632ce477a53059f6ebee6fdffdb8b`,
+paired original/new Containernet throughput comparison and both cluster rollouts.
+Ten sessions / forty measurements passed with unchanged signalled QoS; normal
+NAS/data smoke passed in both clusters. Physical stale-endpoint failures and
+operational guards are recorded, independently of feature code. See the
+[performance/publication report](dynamic-dnn-performance.md). The stage-7
+publication boundary above is historical; no universal performance or conformity
+claim is added.
 Current entry point: [user guide](dynamic-dnn.md),
 [final review and image boundary](dynamic-dnn-final-review.md),
 [executed clause matrix](dynamic-dnn-conformance-matrix.md).

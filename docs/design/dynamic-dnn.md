@@ -187,9 +187,12 @@ complete `customOpen5gsConfig`, mounted paths and securityContext. The UPF needs
 the chart's TUN/network privileges and return routing. Inspect rendered YAML
 and actual Pod imageIDs; tag names or chart `appVersion` alone are insufficient.
 Gradiant chart 2.3.4 required no template changes in the recorded deployments.
-Published and local image identities, including the final correction that is
-not yet published, are listed in the final review. No image publication is
-implied by running unit tests or building a local image.
+The final corrected source is published as `bmarujo/open5gs:dnn-384a54f4d9a0`,
+digest `sha256:a05e25b5cc4e39defa42b87fed82bcd0ace632ce477a53059f6ebee6fdffdb8b`.
+It is deployed to SMF/UPF in both designated clusters, with actual imageIDs and
+NAS/data smoke verified. See the [performance/publication report](dynamic-dnn-performance.md)
+for original/new comparison, build provenance, physical operational guards and
+rollback. Earlier images/results retain their historical identity.
 
 ## Diagnosis, validation and rollback
 

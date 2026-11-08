@@ -1,6 +1,13 @@
 # Dynamic DNN MVP: final review and project closure
 
 Date: 2026-11-08. The MVP is implemented and its scoped validation is complete.
+
+Subsequent authorized publication and rollout are now complete; the historical
+stage-7 image boundary below is retained. The [performance/publication follow-up](dynamic-dnn-performance.md)
+records current source `384a54f4d9a`, the new public digest, five original/new
+pairs (10 sessions / 40 measurements), identical QoS and passing NAS/data smoke
+in Containernet and the physical cluster. Later commits changing documentation
+or Dockerfile comments do not change this image's NF source identity.
 UPF advertises configured pools/DNNs using IE 233, SMF owns the learned metadata
 and its existing selector uses that metadata. Both association initiators,
 multiple same-DNN UPFs and automatic return after loss are covered. DNN OR
@@ -158,7 +165,7 @@ F's `open5gs-dynamic-dnn-images.tar` SHA-256 is
 These are local runtime test images; they do not replace the all-NF Helm image's
 init/probe tools. They were not pushed.
 
-The previously published Helm image remains
+At the stage-7 review, the previously published Helm image was
 `docker.io/bmarujo/open5gs:dnn-055eb4a770d0`, digest
 `sha256:1e125d1f016fa9f3df6354588ebdaee2e281c637157f923003cf0570546d37fa`,
 entry core hash `0d6a194893d6…`. Remaining core NFs were aligned to Gradiant
@@ -228,10 +235,12 @@ IPv4/SST 1 physical/Containernet campaigns. No known introduced regression remai
 open in the executed scope. This is a scoped engineering conclusion, not a claim
 that no undiscovered bugs exist.
 
-Pending operational delivery: commit/review of local changes, rebuild of the
-Helm-compatible image with the final correction, publication only when requested,
-and rollout/cluster verification of that exact digest. This review does not
-silently update the previously running images.
+Operational delivery subsequently completed at the user's request: corrected
+source committed/pushed, Helm-compatible image built/tested/published, deployment
+pins updated, and exact-digest rollouts plus normal NAS/data smoke passed in both
+clusters. The paired comparison also passed. See the follow-up for immutable
+provenance, retained failures, unavailable-node workaround and the narrower
+performance claim.
 
 Remaining validation: external IPv6 DN and slice-restricted advertisement NAS/N6, other vendors,
 load/soak, roaming/handover, exhaustive SGW malformed-Setup cases, cluster
@@ -244,4 +253,4 @@ outside the requested introduced-bug fixes.
 Strict 4B, API/SUPI policy, orchestration, dynamic service/IPAM provisioning,
 Association Update/hot reload and session migration remain excluded. No further
 development stage starts automatically. The MVP project is closed within this
-scope; publication/rollout of its final correction is explicitly outstanding.
+scope; final-correction publication/rollout is complete in the named follow-up.

@@ -5,7 +5,32 @@ Plano de desenvolvimento e prompts sequenciais para Codex no VS Code.
 Preparado em 5 de outubro de 2026; atualizado após as etapas autorizadas abaixo.
 Este documento contém o plano e o estado das entregas, sem certificação de conformidade.
 
-## Estado final — Prompt 7, 8 de novembro de 2026
+## Entrega atual — comparação de desempenho e publicação, 8 de novembro de 2026
+
+Follow-up autorizado concluído: código atualizado em `384a54f4d9a`, commit/push,
+imagem pública `bmarujo/open5gs:dnn-384a54f4d9a0`, digest
+`sha256:a05e25b5cc4e39defa42b87fed82bcd0ace632ce477a53059f6ebee6fdffdb8b`.
+Aplicada à SMF/UPF no Containernet e no cluster físico; as restantes nove NFs
+mantêm Gradiant 2.8.0. Ambas as instalações passaram NAS, seleção learned-DNN
+e tráfego UE; os 11 Pods ativos de NFs estão Ready em cada instalação.
+
+Comparação isolada com a base exata `2c80f8f2ba9d`: PASS, cinco pares alternados,
+dez sessões, quarenta medições TCP/UDP UL/DL. AMBR/MBR, 5QI, ARP e QFI iguais;
+sem novo limitador de bitrate no diff auditado e sem regressão material de
+throughput detetada. A rede de teste tem acesso de 50 Mbit/s: não é certificação
+de capacidade máxima, carga multi-UE ou ausência absoluta de bugs.
+
+Dois smokes físicos falharam por endpoints/caches antigos de Pods em nós já
+indisponíveis. Guard operacional nos Services SBI NRF/SMF/BSF e refresh de runtime
+resolveram o terceiro smoke; falhas preservadas. Não foram apagados à força os
+Pods órfãos. Novos upgrades Helm exigem verificar esse guard enquanto persistir
+o problema dos nós. Recursos temporários e subscritores sintéticos removidos.
+
+[Relatório em inglês, resultados, imagens, evidências e rollback](docs/design/dynamic-dnn-performance.md).
+As secções abaixo preservam o estado histórico de cada etapa; a publicação e o
+rollout antes pendentes estão concluídos. A etapa 4B continua excluída.
+
+## Estado histórico — Prompt 7, 8 de novembro de 2026
 
 MVP das etapas 1–7 concluído para o âmbito documentado: anúncio de pools/DNNs
 por PFCP, aprendizagem owned e utilização pelo seletor legacy. A etapa 4B
