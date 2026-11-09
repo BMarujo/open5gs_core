@@ -1,5 +1,10 @@
 # Dynamic DNN learning with the existing SMF selector
 
+The [single-UE unshaped TCP follow-up](dynamic-dnn-singleue.md) records fresh
+original/new rates and ranges. Its paired equivalence screen is INCONCLUSIVE
+because of measured variability; protocol/QoS and TC restoration checks pass.
+
+
 A subsequent [four-UE unshaped TCP comparison](dynamic-dnn-multiue.md) removes
 the 50-Mbit/s access profile, repeats original/new UL/DL in five pairs and records
 its own scope, retained UDP generator failure and verified TC rollback.

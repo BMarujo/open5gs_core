@@ -38,6 +38,10 @@ Evidence abbreviations:
   `/home/marujo/open5gs_multiue_unshaped_results_20261108T222927Z`; same NF
   binaries, 40 sessions / 80 measurements, final `analysis-03`, verified TC restore.
 
+- **U**: [single-UE unshaped TCP follow-up](dynamic-dnn-singleue.md),
+  `/home/marujo/open5gs_singleue_unshaped_results_20261109T034153Z`; 10 sessions /
+  20 measurements, protocol/QoS checks PASS, throughput equivalence INCONCLUSIVE.
+
 | Clause / nature | Implemented behavior confirmed in code | Test / result | Evidence and boundary |
 |---|---|---|---|
 | S1 §6.3.3.1–3; provisioning and selection | UP-initiated association supplies the peer; usable learned DNNs enter the existing selector | T05–T08 PASS | F `verified-dynamic`, `verified-selection`; K first-request evidence without static peer DNN/location |
@@ -71,7 +75,7 @@ Evidence abbreviations:
 | Association Update / hot reload | Codec descriptors exist; no new running Update procedure or YAML hot reload | T23 NOT RUN | Explicit scope exclusion, not a missing claim hidden by Setup tests |
 | Optional strict selection 4B | Not implemented | T09/T10 NOT RUN (optional) | Deliberately excluded; no strict no-candidate result promised |
 | Shared PFCP consumers / regression boundary | SMF, UPF, SGW-C, SGW-U rebuilt; handlers gate state transition on result | T01/T17 PASS, scoped | F complete build; registration/auth, different-DNN slice and EPC attach/simple; exhaustive SGW malformed-Setup runtime campaign NOT RUN |
-| QoS / performance regression boundary (local verification, no new normative claim) | Existing QER/bitrate conversion and data path preserved; no new rate limiter | PASS, bounded single-UE comparison | P: 10 accepted sessions, 40 TCP/UDP measurements, unchanged 1-Gbit/s AMBR/MBR, 5QI 9, ARP 8, QFI 1; zero PFCP retries; 50-Mbit/s access, maximum capacity/scale NOT RUN; M adds four simultaneous UEs with no TC shaping, equal 10-Gbit/s QoS, zero N4 retries and a passing paired TCP screen; unpaced UDP equivalence NOT RUN |
+| QoS / performance regression boundary (local verification, no new normative claim) | Existing QER/bitrate conversion and data path preserved; no new rate limiter | PASS, bounded single-UE comparison | P: 10 accepted sessions, 40 TCP/UDP measurements, unchanged 1-Gbit/s AMBR/MBR, 5QI 9, ARP 8, QFI 1; zero PFCP retries; 50-Mbit/s access, maximum capacity/scale NOT RUN; M adds four simultaneous UEs with no TC shaping, equal 10-Gbit/s QoS, zero N4 retries and a passing paired TCP screen; unpaced UDP equivalence NOT RUN; U adds one-UE uncapped TCP rates/ranges with equal QoS and zero N4 retries, but equivalence INCONCLUSIVE |
 
 Source-to-test links: [pool cases](../../tests/unit/pfcp-pool-test.c),
 [association cases](../../tests/unit/pfcp-association-test.c),
