@@ -7,6 +7,12 @@ The fork now includes official upstream `5cb35ead227d25a5ed2161d66faade56a9fd12d
 See [the merge report](dynamic-dnn-upstream-merge.md) for executed tests and
 image/deployment status. Historical reports keep their original source identity.
 
+Fresh merge evidence: `open5gs_upstream_merge_results_20261110T031011Z`.
+Full isolated K3s matrix on the merged image passed: 12 positive sessions, 57 N6
+payload checks, first-N4/Cause/retry analysis, B/C return rotation, zero drops and
+no SMF restart. Both normal installations also passed NAS/learned-selection/data
+smokes. The source/image-specific follow-up is [recorded here](dynamic-dnn-upstream-merge.md).
+
 **Recovery update:** upstream now deletes the affected UPF sessions when that
 UPF declares its SMF unreachable after heartbeat expiry. Retention is acknowledged
 only while the UPF still has an existing association/session context. Old sessions

@@ -2,6 +2,17 @@
 
 ## Follow-up — integração do upstream oficial, 10 de novembro de 2026
 
+Entrega concluída: imagem pública `bmarujo/open5gs:dnn-8826ffb868a2`, digest
+`sha256:4a4767caa0277315d6b7a0b7e1929cb73b955479583e460d2d35d720733e1cc1`,
+aplicada à SMF/UPF nos dois clusters. PASS: matriz K3s com 12 sessões/57 checks
+N6, primeiro N4 e smokes normais; 13 Pods normais Ready em cada instalação.
+Canary sem TC entre o fork anterior e o merge: UL 372,779→342,763 Mbit/s,
+DL 350,260→362,250 Mbit/s, três pares. Equivalência de throughput global
+INCONCLUSIVE (UL variável); protocolo/QoS e reposição TC PASS. Não confundir esta
+comparação com a base oficial pré-feature. Falhas de tooling/análise e a antiga
+expectativa de retenção ficam preservadas. Sem regressão funcional pendente
+identificada; capacidade/soak e conformidade integral continuam não demonstrados.
+
 Merge do upstream `5cb35ead227d25a5ed2161d66faade56a9fd12db`, mantendo o MVP
 4A e a versão declarada 2.8.0. Compilação completa, cinco suites unitárias,
 ASan/UBSan sem supressões, regeneração do codec, NAS/EPC, recuperação assimétrica
