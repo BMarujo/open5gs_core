@@ -570,15 +570,8 @@ bool smf_sbi_send_pdu_session_created_data(
 
     ogs_free(authorized_qos_rules.buffer);
 
-    enc_len = ogs_base64_encoded_size(
-            authorized_qos_flow_descriptions.length);
-    ogs_assert(enc_len > 0);
-    qosFlowSetupItem->qos_flow_description = ogs_calloc(1, enc_len);
-    ogs_assert(qosFlowSetupItem->qos_flow_description);
-    ogs_assert(ogs_base64_encode_from_buffer(
-            qosFlowSetupItem->qos_flow_description, enc_len,
-            authorized_qos_flow_descriptions.buffer,
-            authorized_qos_flow_descriptions.length) > 0);
+    qosFlowSetupItem->qos_flow_description =
+        gsm_encode_qos_flow_description_ie(&authorized_qos_flow_descriptions);
 
     ogs_free(authorized_qos_flow_descriptions.buffer);
 
@@ -718,6 +711,9 @@ end:
         ogs_free(PduSessionCreatedData.ue_ipv4_address);
     if (PduSessionCreatedData.ue_ipv6_prefix)
         ogs_free(PduSessionCreatedData.ue_ipv6_prefix);
+
+    if (n1SmBufToUe)
+        ogs_pkbuf_free(n1SmBufToUe);
 
     return success;
 }

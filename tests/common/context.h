@@ -299,6 +299,7 @@ typedef struct test_ue_s {
     char *imsi;
     char *suci; /* TS33.501 : SUCI */
     char *supi; /* TS33.501 : SUPI */
+    char *eir_fixture_id; /* Owned common-test equipment record, if any */
 
     uint8_t imsi_buf[OGS_MAX_IMSI_LEN];
     int imsi_len;
@@ -411,6 +412,7 @@ typedef struct test_ue_s {
     /* EPC: Last received message */
     S1AP_ProcedureCode_t s1ap_procedure_code;
     uint8_t emm_message_type;
+    ogs_nas_emm_cause_t attach_reject_cause;
     uint8_t esm_message_type;
 
     test_sess_t *sess;
@@ -533,7 +535,11 @@ test_bearer_t *test_bearer_find_by_ue_ebi(test_ue_t *test_ue, uint8_t ebi);
 test_bearer_t *test_qos_flow_find_by_qfi(test_sess_t *sess, uint8_t qfi);
 
 int test_db_insert_ue(test_ue_t *test_ue, bson_t *doc);
+/* EIR verdict tests manage equipment records independently. */
+int test_db_insert_subscriber(test_ue_t *test_ue, bson_t *doc);
 int test_db_remove_ue(test_ue_t *test_ue);
+/* Call before closing the database, including after an early test failure. */
+int test_db_cleanup_eir(void);
 
 bson_t *test_db_new_simple(test_ue_t *test_ue);
 bson_t *test_db_new_qos_flow(test_ue_t *test_ue);

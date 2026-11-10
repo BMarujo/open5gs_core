@@ -53,11 +53,6 @@ typedef enum {
     REGISTRATION_STATUS_UPDATE_NEW_AMF_STATE,
 } amf_ue_context_transfer_state_t;
 
-typedef enum {
-    AMF_EIR_ACTION_ALLOW = 0,
-    AMF_EIR_ACTION_REJECT,
-} amf_eir_action_e;
-
 typedef struct amf_context_s {
     /* Served GUAMI */
     int num_of_served_guami;
@@ -137,9 +132,9 @@ typedef struct amf_context_s {
 
     struct {
         bool enabled;
-        amf_eir_action_e unknown_action;
-        amf_eir_action_e failure_action;
-        amf_eir_action_e missing_pei_action;
+        ogs_eir_action_e unknown_action;
+        ogs_eir_action_e failure_action;
+        ogs_eir_action_e missing_pei_action;
     } eir;
 
 } amf_context_t;
@@ -285,6 +280,8 @@ struct ran_ue_s {
 }; 
 
 typedef struct amf_ue_memento_s {
+    uint8_t ue_ksi, ue_tsc, amf_ksi, amf_tsc;
+
     /* UE security capability info: supported security features. */
     ogs_nas_ue_security_capability_t ue_security_capability;
     /* UE network capability info: supported network features. */
@@ -356,6 +353,8 @@ struct amf_ue_s {
         uint8_t message_type; /* Type of last specific NAS message received */
         int access_type; /* 3GPP or Non-3GPP */
 
+        /* AMF-selected context identifier and the last received request's
+         * identifier. Authentication must not overwrite the received value. */
         struct {
         ED3(uint8_t tsc:1;,
             uint8_t ksi:3;,
@@ -464,11 +463,12 @@ struct amf_ue_s {
         bool s1_mode;
     } gmm_capability;
 
+/* Received ngKSI values are checked separately by the NAS procedures. */
 #define SECURITY_CONTEXT_IS_VALID(__aMF) \
     ((__aMF) && \
     ((__aMF)->security_context_available == 1) && \
      ((__aMF)->mac_failed == 0) && \
-     ((__aMF)->nas.ue.ksi != OGS_NAS_KSI_NO_KEY_IS_AVAILABLE))
+     ((__aMF)->nas.amf.ksi != OGS_NAS_KSI_NO_KEY_IS_AVAILABLE))
 #define CLEAR_SECURITY_CONTEXT(__aMF) \
     do { \
         ogs_assert((__aMF)); \
@@ -486,6 +486,10 @@ struct amf_ue_s {
 
     /* flag: 1 = allow restoration of context, 0 = disallow */
     bool            can_restore_context;
+
+    /* Same-AMF re-registration release waits for SMC and optional EIR. */
+    bool            registration_session_release_after_authentication;
+    bool            registration_session_release_pending;
 
     /* Memento of context fields */
     amf_ue_memento_t memento;
@@ -692,6 +696,19 @@ struct amf_ue_s {
         (__aMF)->ran_ue_holding_id = OGS_INVALID_POOL_ID; \
     } while(0)
     ogs_pool_id_t   ran_ue_holding_id;
+
+    /*
+     * N2 handovers this UE has been through, counted where the AMF is certain.
+     *
+     * A handover that is commanded and then simply never completes is not
+     * counted anywhere: the AMF has no guard timer for one, and the UE
+     * re-attaching afterwards is indistinguishable from an ordinary power
+     * cycle. attempted less completed less rejected is therefore the number
+     * that failed silently, which is the number worth looking at.
+     */
+    uint32_t        ho_attempted;
+    uint32_t        ho_completed;
+    uint32_t        ho_rejected;
 
 #define CLEAR_AMF_UE_ALL_TIMERS(__aMF) \
     do { \
@@ -1100,6 +1117,8 @@ ran_ue_t *ran_ue_find_by_amf_ue_ngap_id(uint64_t amf_ue_ngap_id);
 ran_ue_t *ran_ue_find_by_id(ogs_pool_id_t id);
 
 void amf_ue_new_guti(amf_ue_t *amf_ue);
+void amf_ue_publish_next_guti(amf_ue_t *amf_ue);
+void amf_ue_unpublish_next_guti(amf_ue_t *amf_ue);
 void amf_ue_confirm_guti(amf_ue_t *amf_ue);
 
 amf_ue_t *amf_ue_add(ran_ue_t *ran_ue);
@@ -1114,7 +1133,9 @@ amf_ue_t *amf_ue_find_by_suci(char *suci);
 amf_ue_t *amf_ue_find_by_supi(char *supi);
 amf_ue_t *amf_ue_find_by_ue_context_id(char *ue_context_id);
 
-amf_ue_t *amf_ue_find_by_message(ogs_nas_5gs_message_t *message);
+/* pending_guti is an optional output for NAS Registration Request lookup. */
+amf_ue_t *amf_ue_find_by_message(
+        ogs_nas_5gs_message_t *message, bool *pending_guti);
 void amf_ue_set_suci(amf_ue_t *amf_ue,
         ogs_nas_5gs_mobile_identity_t *mobile_identity);
 void amf_ue_set_supi(amf_ue_t *amf_ue, char *supi);

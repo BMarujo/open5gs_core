@@ -34,6 +34,27 @@ static ogs_nas_5gmm_cause_t gmm_handle_nas_message_container(
 
 static uint8_t gmm_cause_from_access_control(ogs_plmn_id_t *plmn_id);
 
+/* Compare the current message's ngKSI without changing the stored context. */
+bool gmm_check_ngksi(const amf_ue_t *amf_ue, uint8_t tsc, uint8_t ksi)
+{
+    ogs_assert(amf_ue);
+
+    if (ksi == OGS_NAS_KSI_NO_KEY_IS_AVAILABLE) {
+        ogs_debug("UE indicates no NAS security context");
+        return false;
+    }
+
+    if (tsc != amf_ue->nas.amf.tsc || ksi != amf_ue->nas.amf.ksi) {
+        ogs_warn("[%s] ngKSI mismatch "
+                "TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
+                AMF_UE_HAVE_SUCI(amf_ue) ? amf_ue->suci : "Unknown UE",
+                tsc, amf_ue->nas.amf.tsc, ksi, amf_ue->nas.amf.ksi);
+        return false;
+    }
+
+    return true;
+}
+
 ogs_nas_5gmm_cause_t gmm_handle_registration_request(amf_ue_t *amf_ue,
         ogs_nas_security_header_type_t h, NGAP_ProcedureCode_t ngap_code,
         ogs_nas_5gs_registration_request_t *registration_request)
@@ -267,16 +288,20 @@ ogs_nas_5gmm_cause_t gmm_handle_registration_request(amf_ue_t *amf_ue,
 
     amf_ue->nas.ue.tsc = registration_type->tsc;
     amf_ue->nas.ue.ksi = registration_type->ksi;
-    ogs_debug("    OLD TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
+    ogs_debug("    TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
             amf_ue->nas.ue.tsc, amf_ue->nas.amf.tsc,
             amf_ue->nas.ue.ksi, amf_ue->nas.amf.ksi);
-    if (amf_ue->nas.ue.ksi < OGS_NAS_KSI_NO_KEY_IS_AVAILABLE) {
-        amf_ue->nas.amf.tsc = amf_ue->nas.ue.tsc;
-        amf_ue->nas.amf.ksi = amf_ue->nas.ue.ksi;
+
+    /*
+     * TS24.501 4.4.2.5: Check the received ngKSI before reusing
+     * the stored NAS security context.
+     */
+    if (SECURITY_CONTEXT_IS_VALID(amf_ue) &&
+        !gmm_check_ngksi(amf_ue, registration_type->tsc,
+            registration_type->ksi)) {
+        CLEAR_SECURITY_CONTEXT(amf_ue);
     }
-    ogs_debug("    NEW TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
-            amf_ue->nas.ue.tsc, amf_ue->nas.amf.tsc,
-            amf_ue->nas.ue.ksi, amf_ue->nas.amf.ksi);
+
     /*
      * REGISTRATION_REQUEST
      * SERVICE_REQUEST
@@ -503,18 +528,20 @@ ogs_nas_5gmm_cause_t gmm_handle_registration_update(
         psimask |= pdu_session_status->psi << 8;
         psimask |= pdu_session_status->psi >> 8;
 
-        ogs_list_for_each(&amf_ue->sess_list, sess) {
-            if ((psimask & (1 << sess->psi)) == 0) {
-                if (SESSION_CONTEXT_IN_SMF(sess)) {
-                    amf_nsmf_pdusession_sm_context_param_t param;
+        if (!amf_ue->registration_session_release_after_authentication) {
+            ogs_list_for_each(&amf_ue->sess_list, sess) {
+                if ((psimask & (1 << sess->psi)) == 0) {
+                    if (SESSION_CONTEXT_IN_SMF(sess)) {
+                        amf_nsmf_pdusession_sm_context_param_t param;
 
-                    memset(&param, 0, sizeof(param));
-                    param.ue_location = true;
-                    param.ue_timezone = true;
+                        memset(&param, 0, sizeof(param));
+                        param.ue_location = true;
+                        param.ue_timezone = true;
 
-                    amf_sbi_send_release_session(
-                        ran_ue, sess,
-                        AMF_RELEASE_SM_CONTEXT_REGISTRATION_ACCEPT, &param);
+                        amf_sbi_send_release_session(
+                            ran_ue, sess,
+                            AMF_RELEASE_SM_CONTEXT_REGISTRATION_ACCEPT, &param);
+                    }
                 }
             }
         }
@@ -530,12 +557,14 @@ ogs_nas_5gmm_cause_t gmm_handle_registration_update(
         psimask |= uplink_data_status->psi << 8;
         psimask |= uplink_data_status->psi >> 8;
 
-        ogs_list_for_each(&amf_ue->sess_list, sess) {
-            if (psimask & (1 << sess->psi)) {
-                if (SESSION_CONTEXT_IN_SMF(sess))
-                    amf_sbi_send_activating_session(
-                            ran_ue, sess,
-                            AMF_UPDATE_SM_CONTEXT_REGISTRATION_REQUEST);
+        if (!amf_ue->registration_session_release_after_authentication) {
+            ogs_list_for_each(&amf_ue->sess_list, sess) {
+                if (psimask & (1 << sess->psi)) {
+                    if (SESSION_CONTEXT_IN_SMF(sess))
+                        amf_sbi_send_activating_session(
+                                ran_ue, sess,
+                                AMF_UPDATE_SM_CONTEXT_REGISTRATION_REQUEST);
+                }
             }
         }
     }
@@ -706,14 +735,7 @@ ogs_nas_5gmm_cause_t gmm_handle_service_request(amf_ue_t *amf_ue,
 
     amf_ue->nas.ue.tsc = ngksi->tsc;
     amf_ue->nas.ue.ksi = ngksi->value;
-    ogs_debug("    OLD TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
-            amf_ue->nas.ue.tsc, amf_ue->nas.amf.tsc,
-            amf_ue->nas.ue.ksi, amf_ue->nas.amf.ksi);
-    if (amf_ue->nas.ue.ksi < OGS_NAS_KSI_NO_KEY_IS_AVAILABLE) {
-        amf_ue->nas.amf.tsc = amf_ue->nas.ue.tsc;
-        amf_ue->nas.amf.ksi = amf_ue->nas.ue.ksi;
-    }
-    ogs_debug("    NEW TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
+    ogs_debug("    TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
             amf_ue->nas.ue.tsc, amf_ue->nas.amf.tsc,
             amf_ue->nas.ue.ksi, amf_ue->nas.amf.ksi);
 
@@ -723,6 +745,11 @@ ogs_nas_5gmm_cause_t gmm_handle_service_request(amf_ue_t *amf_ue,
      *   Clear Timer and Message
      */
     CLEAR_AMF_UE_ALL_TIMERS(amf_ue);
+
+    if (SECURITY_CONTEXT_IS_VALID(amf_ue) &&
+        !gmm_check_ngksi(amf_ue, ngksi->tsc, ngksi->value)) {
+        return OGS_5GMM_CAUSE_UE_IDENTITY_CANNOT_BE_DERIVED_BY_THE_NETWORK;
+    }
 
     if (SECURITY_CONTEXT_IS_VALID(amf_ue)) {
         ogs_kdf_kgnb_and_kn3iwf(
@@ -901,14 +928,7 @@ int gmm_handle_deregistration_request(amf_ue_t *amf_ue,
 
     amf_ue->nas.ue.tsc = de_registration_type->tsc;
     amf_ue->nas.ue.ksi = de_registration_type->ksi;
-    ogs_debug("    OLD TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
-            amf_ue->nas.ue.tsc, amf_ue->nas.amf.tsc,
-            amf_ue->nas.ue.ksi, amf_ue->nas.amf.ksi);
-    if (amf_ue->nas.ue.ksi < OGS_NAS_KSI_NO_KEY_IS_AVAILABLE) {
-        amf_ue->nas.amf.tsc = amf_ue->nas.ue.tsc;
-        amf_ue->nas.amf.ksi = amf_ue->nas.ue.ksi;
-    }
-    ogs_debug("    NEW TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
+    ogs_debug("    TSC[UE:%d,AMF:%d] KSI[UE:%d,AMF:%d]",
             amf_ue->nas.ue.tsc, amf_ue->nas.amf.tsc,
             amf_ue->nas.ue.ksi, amf_ue->nas.amf.ksi);
 
@@ -986,12 +1006,12 @@ int gmm_handle_authentication_response(amf_ue_t *amf_ue,
             amf_ue->rand, authentication_response_parameter->res, hxres_star);
 
     if (memcmp(hxres_star, amf_ue->hxres_star, OGS_MAX_RES_LEN) != 0) {
-        ogs_error("[%s] MAC failure", amf_ue->suci);
-        ogs_log_hexdump(OGS_LOG_ERROR,
+        ogs_warn("[%s] MAC failure", amf_ue->suci);
+        ogs_log_hexdump(OGS_LOG_WARN,
                 authentication_response_parameter->res,
                 authentication_response_parameter->length);
-        ogs_log_hexdump(OGS_LOG_ERROR, hxres_star, OGS_MAX_RES_LEN);
-        ogs_log_hexdump(OGS_LOG_ERROR,
+        ogs_log_hexdump(OGS_LOG_WARN, hxres_star, OGS_MAX_RES_LEN);
+        ogs_log_hexdump(OGS_LOG_WARN,
                 amf_ue->hxres_star, OGS_MAX_RES_LEN);
         return OGS_ERROR;
     }
@@ -1125,22 +1145,31 @@ ogs_nas_5gmm_cause_t gmm_handle_security_mode_complete(amf_ue_t *amf_ue,
         mobile_identity_imeisv =
             (ogs_nas_mobile_identity_imeisv_t *)imeisv->buffer;
         ogs_assert(mobile_identity_imeisv);
-
-        switch (mobile_identity_imeisv->type) {
-        case OGS_NAS_5GS_MOBILE_IDENTITY_IMEISV:
-            /* TS23.003 6.2.2 Composition of IMEISV
-             *
-             * The International Mobile station Equipment Identity and
-             * Software Version Number (IMEISV) is composed.
-             *
-             * TAC(8 digits) - SNR(6 digits) - SVN(2 digits)
-             * IMEISV(16 digits) ==> 8bytes
-             */
-            if (imeisv->length == sizeof(ogs_nas_mobile_identity_imeisv_t)) {
+        /* Check the container before reading even its identity type. */
+        if (imeisv->length != sizeof(*mobile_identity_imeisv)) {
+            ogs_error("[%s] Invalid IMEISV length [%d]",
+                    amf_ue->supi, imeisv->length);
+            ogs_log_hexdump(OGS_LOG_ERROR, imeisv->buffer, imeisv->length);
+        } else {
+            switch (mobile_identity_imeisv->type) {
+            case OGS_NAS_5GS_MOBILE_IDENTITY_IMEISV:
+                /* TS23.003 6.2.2 Composition of IMEISV
+                 *
+                 * The International Mobile station Equipment Identity and
+                 * Software Version Number (IMEISV) is composed.
+                 *
+                 * TAC(8 digits) - SNR(6 digits) - SVN(2 digits)
+                 * IMEISV(16 digits) ==> 8bytes
+                 */
+                if (ogs_nas_imeisv_to_bcd(mobile_identity_imeisv,
+                            imeisv->length, amf_ue->imeisv_bcd) != OGS_OK) {
+                    ogs_error("[%s] Invalid IMEISV encoding", amf_ue->supi);
+                    ogs_log_hexdump(OGS_LOG_ERROR,
+                            imeisv->buffer, imeisv->length);
+                    break;
+                }
                 memcpy(&amf_ue->nas_mobile_identity_imeisv,
                     mobile_identity_imeisv, imeisv->length);
-                ogs_nas_imeisv_to_bcd(mobile_identity_imeisv, imeisv->length,
-                        amf_ue->imeisv_bcd);
                 ogs_nas_imeisv_bcd_to_buffer(amf_ue->imeisv_bcd,
                         amf_ue->masked_imeisv, &amf_ue->masked_imeisv_len);
                 amf_ue->masked_imeisv[5] = 0xff;
@@ -1149,17 +1178,12 @@ ogs_nas_5gmm_cause_t gmm_handle_security_mode_complete(amf_ue_t *amf_ue,
                     ogs_free(amf_ue->pei);
                 amf_ue->pei = ogs_msprintf("imeisv-%s", amf_ue->imeisv_bcd);
                 ogs_assert(amf_ue->pei);
-            } else {
-                ogs_error("[%s] Unknown IMEISV Length [%d]",
-                        amf_ue->supi, imeisv->length);
-                ogs_log_hexdump(OGS_LOG_ERROR, imeisv->buffer, imeisv->length);
+                break;
+            default:
+                ogs_error("[%s] Invalid IMEISV Type [%d]",
+                        amf_ue->supi, mobile_identity_imeisv->type);
+                break;
             }
-            break;
-        default:
-            ogs_warn("[%s] Invalid IMEISV Type [%d]",
-                    amf_ue->supi, mobile_identity_imeisv->type);
-            break;
-
         }
     }
 

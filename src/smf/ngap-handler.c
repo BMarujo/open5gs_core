@@ -525,6 +525,14 @@ int ngap_handle_pdu_session_resource_modify_response_transfer(
                 qos_flow = smf_qos_flow_find_by_qfi(sess,
                         qosFlowAddOrModifyResponseItem->qosFlowIdentifier);
                 if (qos_flow) {
+                    /* Adding the same node twice makes the list circular */
+                    if (ogs_list_exists(&sess->qos_flow_to_modify_list,
+                                &qos_flow->to_modify_node)) {
+                        ogs_error("[%s:%d] Duplicate QFI [%d]",
+                                smf_ue->supi, sess->psi, qos_flow->qfi);
+                        continue;
+                    }
+
                     dl_far = qos_flow->dl_far;
                     ogs_assert(dl_far);
 
@@ -820,9 +828,16 @@ int ngap_handle_handover_required_transfer(
         goto cleanup;
     }
 
+    /*
+     * Always re-evaluate per HO prep: the flag must not carry state
+     * from a previous handover.  The source gNB sets the optional
+     * directForwardingPathAvailability IE inside HandoverRequiredTransfer
+     * when direct forwarding between source and target is available;
+     * the AMF passes the container through transparently.
+     */
     directForwardingPathAvailability = message.directForwardingPathAvailability;
-    if (!directForwardingPathAvailability)
-        sess->handover.data_forwarding_not_possible = true;
+    sess->handover.data_forwarding_not_possible =
+            (directForwardingPathAvailability == NULL);
 
     n2smbuf = ngap_build_pdu_session_resource_setup_request_transfer(sess);
     ogs_assert(n2smbuf);

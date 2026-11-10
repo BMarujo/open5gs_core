@@ -183,6 +183,8 @@ int nas_eps_send_attach_accept(mme_ue_t *mme_ue)
 
     rv = nas_eps_send_to_enb(mme_ue, s1apbuf);
     ogs_expect(rv == OGS_OK);
+    if (rv == OGS_OK && MME_NEXT_GUTI_IS_AVAILABLE(mme_ue))
+        mme_ue_publish_next_guti(mme_ue);
 
     return rv;
 }
@@ -823,6 +825,38 @@ int nas_eps_send_bearer_resource_modification_reject(
             mme_ue, pti, esm_cause);
     if (!esmbuf) {
         ogs_error("esm_build_bearer_resource_modification_reject() failed");
+        return OGS_ERROR;
+    }
+
+    rv = nas_eps_send_to_downlink_nas_transport(enb_ue, esmbuf);
+    ogs_expect(rv == OGS_OK);
+
+    return rv;
+}
+
+int nas_eps_send_pdn_disconnect_reject(
+        mme_ue_t *mme_ue, uint8_t pti, ogs_nas_esm_cause_t esm_cause)
+{
+    int rv;
+    enb_ue_t *enb_ue = NULL;
+    ogs_pkbuf_t *esmbuf = NULL;
+
+    if (!mme_ue) {
+        ogs_error("UE(mme-ue) context has already been removed");
+        return OGS_NOTFOUND;
+    }
+
+    enb_ue = enb_ue_find_by_id(mme_ue->enb_ue_id);
+    if (!enb_ue) {
+        ogs_error("S1 context has already been removed");
+        return OGS_NOTFOUND;
+    }
+
+    ogs_assert(pti != OGS_NAS_PROCEDURE_TRANSACTION_IDENTITY_UNASSIGNED);
+
+    esmbuf = esm_build_pdn_disconnect_reject(mme_ue, pti, esm_cause);
+    if (!esmbuf) {
+        ogs_error("esm_build_pdn_disconnect_reject() failed");
         return OGS_ERROR;
     }
 

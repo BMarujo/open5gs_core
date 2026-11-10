@@ -18,6 +18,7 @@
  */
 
 #include "ogs-gtp.h"
+#include "ogs-nas-eps.h"
 #include "core/abts.h"
 
 static void gtp_message_test1(abts_case *tc, void *data)
@@ -149,10 +150,11 @@ static void gtp_message_test1(abts_case *tc, void *data)
     pco.ids[2].id = OGS_PCO_ID_IP_ADDRESS_ALLOCATION_VIA_NAS_SIGNALLING;
     pco.ids[2].len = 0;
 
+    rv = ogs_pco_build(pcobuf, OGS_MAX_PCO_LEN, &pco);
+    ogs_assert(rv > 0);
     req.protocol_configuration_options.presence = 1;
     req.protocol_configuration_options.data = &pcobuf;
-    req.protocol_configuration_options.len =
-        ogs_pco_build(pcobuf, OGS_MAX_PCO_LEN, &pco);
+    req.protocol_configuration_options.len = rv;
 
     req.bearer_contexts_to_be_created[0].presence = 1;
     req.bearer_contexts_to_be_created[0].eps_bearer_id.presence = 1;
@@ -313,11 +315,154 @@ static void gtp_message_test1(abts_case *tc, void *data)
     ogs_pkbuf_free(pkbuf);
 }
 
+/* 7.7.28 MM Context: header up to and including the DRX parameter,
+ * Security Mode = UMTS keys and quintuplets with no vector. */
+static unsigned int mm_context_head(uint8_t *ie)
+{
+    unsigned int i, n = 0;
+
+    ie[n++] = 0xc0; /* GUPII=1, UGIPAI=1, protection algo=0, KSI=0 */
+    ie[n++] = 0x87; /* Security Mode=2, No of Vectors=0, Used Cipher=7 */
+    for (i = 0; i < 16; i++)
+        ie[n++] = 0x11; /* CK */
+    for (i = 0; i < 16; i++)
+        ie[n++] = 0x22; /* IK */
+    ie[n++] = 0x00;
+    ie[n++] = 0x00; /* Quintuplet Length */
+    ie[n++] = 0x00;
+    ie[n++] = 0x00; /* DRX parameter */
+
+    return n;
+}
+
+static void gtp1_mm_context_test(abts_case *tc, void *data)
+{
+    ogs_gtp1_mm_context_decoded_t dec, redec;
+    ogs_gtp1_tlv_mm_context_t mm_context;
+    ogs_tlv_octet_t octet;
+    uint8_t ie[1024];
+    uint8_t buf[512];
+    unsigned int i, n;
+    int id = ogs_log_get_domain_id("gtp");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+
+    /* MS Network Capability longer than the decoded buffer is rejected. */
+    n = mm_context_head(ie);
+    ie[n++] = sizeof(dec.ms_network_capability) + 1;
+    for (i = 0; i < sizeof(dec.ms_network_capability) + 1; i++)
+        ie[n++] = 0x41;
+    /* Container Length */
+    ie[n++] = 0x00;
+    ie[n++] = 0x00;
+    ie[n++] = 0x00; /* Length of Access Restriction Data */
+    octet.data = ie;
+    octet.len = n;
+    /* Keep expected errors quiet unless debug/trace logging is requested. */
+    if (level >= OGS_LOG_ERROR && level < OGS_LOG_DEBUG)
+        ogs_log_set_domain_level(id, OGS_LOG_FATAL);
+    ABTS_INT_EQUAL(tc, OGS_ERROR, ogs_gtp1_parse_mm_context(&dec, &octet));
+
+    /* IMEISV longer than the decoded buffer is rejected. */
+    n = mm_context_head(ie);
+    ie[n++] = 0x03; /* MS Network Capability Length */
+    ie[n++] = 0xe5;
+    ie[n++] = 0xe0;
+    ie[n++] = 0x00;
+    /* Container Length */
+    ie[n++] = 0x00;
+    ie[n++] = 2 + sizeof(dec.imeisv) + 1;
+    ie[n++] = 0x23; /* Mobile Identity IMEISV */
+    ie[n++] = sizeof(dec.imeisv) + 1;
+    for (i = 0; i < sizeof(dec.imeisv) + 1; i++)
+        ie[n++] = 0x5a;
+    ie[n++] = 0x00; /* Length of Access Restriction Data */
+    octet.data = ie;
+    octet.len = n;
+    ABTS_INT_EQUAL(tc, OGS_ERROR, ogs_gtp1_parse_mm_context(&dec, &octet));
+    ogs_log_set_domain_level(id, level);
+
+    /* The largest MS Network Capability and IMEISV a peer may send survive
+     * a parse/build round trip unchanged. */
+    n = mm_context_head(ie);
+    ie[n++] = sizeof(dec.ms_network_capability);
+    for (i = 0; i < sizeof(dec.ms_network_capability); i++)
+        ie[n++] = 0xa0 + i;
+    /* Container Length */
+    ie[n++] = 0x00;
+    ie[n++] = 2 + sizeof(ogs_nas_mobile_identity_imeisv_t);
+    ie[n++] = 0x23; /* Mobile Identity IMEISV */
+    ie[n++] = sizeof(ogs_nas_mobile_identity_imeisv_t);
+    for (i = 0; i < sizeof(ogs_nas_mobile_identity_imeisv_t); i++)
+        ie[n++] = 0x30 + i;
+    ie[n++] = 0x00; /* Length of Access Restriction Data */
+    octet.data = ie;
+    octet.len = n;
+    ABTS_INT_EQUAL(tc, OGS_OK, ogs_gtp1_parse_mm_context(&dec, &octet));
+    ABTS_INT_EQUAL(tc, sizeof(dec.ms_network_capability),
+            dec.ms_network_capability_len);
+    ABTS_INT_EQUAL(tc, sizeof(ogs_nas_mobile_identity_imeisv_t),
+            dec.imeisv_len);
+    for (i = 0; i < sizeof(dec.ms_network_capability); i++)
+        ABTS_INT_EQUAL(tc, 0xa0 + i, dec.ms_network_capability[i]);
+    for (i = 0; i < sizeof(ogs_nas_mobile_identity_imeisv_t); i++)
+        ABTS_INT_EQUAL(tc, 0x30 + i, dec.imeisv[i]);
+
+    memset(&mm_context, 0, sizeof(mm_context));
+    ABTS_INT_EQUAL(tc, OGS_OK,
+            ogs_gtp1_build_mm_context(&mm_context, &dec, buf, sizeof(buf)));
+    ABTS_INT_EQUAL(tc, n, mm_context.len);
+
+    octet.data = mm_context.data;
+    octet.len = mm_context.len;
+    ABTS_INT_EQUAL(tc, OGS_OK, ogs_gtp1_parse_mm_context(&redec, &octet));
+    ABTS_INT_EQUAL(tc, 0, memcmp(redec.ms_network_capability,
+            dec.ms_network_capability, dec.ms_network_capability_len));
+    ABTS_INT_EQUAL(tc, 0,
+            memcmp(redec.imeisv, dec.imeisv, dec.imeisv_len));
+}
+
+static void gtp2_tft_ipv6_prefix_length_test(abts_case *tc, void *data)
+{
+    ogs_gtp2_tft_t tft;
+    ogs_tlv_octet_t octet;
+    uint8_t ie[64];
+    unsigned int i, n = 0;
+    int id = ogs_log_get_domain_id("gtp");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+
+    /* Create new TFT, one bi-directional packet filter whose only
+     * component is an IPv6 remote address/prefix length. */
+    ie[n++] = (OGS_GTP2_TFT_CODE_CREATE_NEW_TFT << 5) | 1;
+    ie[n++] = (OGS_FLOW_BIDIRECTIONAL << 4) | 0;
+    ie[n++] = 0x00; /* Precedence */
+    ie[n++] = 1 + OGS_IPV6_LEN + 1; /* Length of packet filter contents */
+    ie[n++] = OGS_PACKET_FILTER_IPV6_REMOTE_ADDRESS_PREFIX_LENGTH_TYPE;
+    for (i = 0; i < OGS_IPV6_LEN; i++)
+        ie[n++] = 0x20 + i;
+    ie[n++] = OGS_IPV6_128_PREFIX_LEN + 1;
+    octet.data = ie;
+    octet.len = n;
+
+    /* A prefix length above 128 is rejected. */
+    if (level >= OGS_LOG_ERROR && level < OGS_LOG_DEBUG)
+        ogs_log_set_domain_level(id, OGS_LOG_FATAL);
+    ABTS_TRUE(tc, ogs_gtp2_parse_tft(&tft, &octet) != n);
+    ogs_log_set_domain_level(id, level);
+
+    /* The largest valid prefix length is still accepted. */
+    ie[n-1] = OGS_IPV6_128_PREFIX_LEN;
+    ABTS_INT_EQUAL(tc, n, ogs_gtp2_parse_tft(&tft, &octet));
+    ABTS_INT_EQUAL(tc, OGS_IPV6_128_PREFIX_LEN,
+            tft.pf[0].content.component[0].ipv6.prefixlen);
+}
+
 abts_suite *test_gtp_message(abts_suite *suite)
 {
     suite = ADD_SUITE(suite)
 
     abts_run_test(suite, gtp_message_test1, NULL);
+    abts_run_test(suite, gtp1_mm_context_test, NULL);
+    abts_run_test(suite, gtp2_tft_ipv6_prefix_length_test, NULL);
 
     return suite;
 }

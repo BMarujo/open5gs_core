@@ -861,83 +861,18 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
                 nf_instance = e->h.sbi.data;
                 ogs_assert(nf_instance);
 
-    /*
-     * Guard against dispatching to an FSM that may have been finalized
-     * by an asynchronous shutdown triggered by SIGTERM.
-     *
-     * In init.c’s event_termination(), which can be invoked asynchronously
-     * when the process receives SIGTERM, we iterate over all NF instances:
-     *     ogs_list_for_each(&ogs_sbi_self()->nf_instance_list, nf_instance)
-     *         ogs_sbi_nf_fsm_fini(nf_instance);
-     * and call ogs_fsm_fini() on each instance’s FSM. That finalizes the FSM
-     * and its state is reset to zero.
-     *
-     * After event_termination(), any incoming SBI response—such as an NRF
-     * client callback arriving after deregistration—would otherwise be
-     * dispatched into a dead FSM and trigger an assertion failure.
-     *
-     * To avoid this, we check OGS_FSM_STATE(&nf_instance->sm):
-     *   - If non-zero, the FSM is still active and can safely handle the event.
-     *   - If zero, the FSM has already been finalized by event_termination(),
-     *     so we log and drop the event to allow graceful shutdown.
-     */
+                /* Dispatch only while the NF instance FSM is active. */
                 if (OGS_FSM_STATE(&nf_instance->sm)) {
                     e->h.sbi.message = &sbi_message;
                     ogs_fsm_dispatch(&nf_instance->sm, e);
                 } else
-                    ogs_error("NF instance FSM has been finalized");
+                    ogs_warn("NF instance FSM has been finalized");
 
                 break;
 
             CASE(OGS_SBI_RESOURCE_NAME_SUBSCRIPTIONS)
-                subscription_data = e->h.sbi.data;
-                ogs_assert(subscription_data);
-
-                SWITCH(sbi_message.h.method)
-                CASE(OGS_SBI_HTTP_METHOD_POST)
-                    if (sbi_message.res_status == OGS_SBI_HTTP_STATUS_CREATED ||
-                        sbi_message.res_status == OGS_SBI_HTTP_STATUS_OK) {
-                        ogs_nnrf_nfm_handle_nf_status_subscribe(
-                                subscription_data, &sbi_message);
-                    } else {
-                        ogs_error("HTTP response error : %d",
-                                sbi_message.res_status);
-                    }
-                    break;
-
-                CASE(OGS_SBI_HTTP_METHOD_PATCH)
-                    if (sbi_message.res_status == OGS_SBI_HTTP_STATUS_OK ||
-                        sbi_message.res_status ==
-                            OGS_SBI_HTTP_STATUS_NO_CONTENT) {
-                        ogs_nnrf_nfm_handle_nf_status_update(
-                                subscription_data, &sbi_message);
-                    } else {
-                        ogs_error("[%s] HTTP response error [%d]",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown",
-                                sbi_message.res_status);
-                    }
-                    break;
-
-                CASE(OGS_SBI_HTTP_METHOD_DELETE)
-                    if (sbi_message.res_status ==
-                            OGS_SBI_HTTP_STATUS_NO_CONTENT)
-                        ogs_info("[%s] Subscription deleted",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown");
-                    else
-                        ogs_error("[%s] HTTP response error [%d]",
-                                subscription_data->id ?
-                                    subscription_data->id : "Unknown",
-                                sbi_message.res_status);
-
-                    ogs_sbi_subscription_data_remove(subscription_data);
-                    break;
-
-                DEFAULT
-                    ogs_error("Invalid HTTP method [%s]", sbi_message.h.method);
-                    ogs_assert_if_reached();
-                END
+                ogs_nnrf_nfm_handle_nf_status_subscription_response(
+                        &sbi_message, e->h.sbi.data);
                 break;
 
             DEFAULT
@@ -1006,9 +941,27 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
             ogs_assert(sbi_object_id >= OGS_MIN_POOL_ID &&
                     sbi_object_id <= OGS_MAX_POOL_ID);
 
+            /*
+             * During UE-initiated PDU Session Release, SBI cleanup requests
+             * may be sent without an associated HTTP stream.
+             * In this case, e->h.sbi.data still contains the SBI transaction
+             * ID, which the session FSM interprets as a stream ID.
+             *
+             * If the transaction ID coincides with an unrelated HTTP stream
+             * ID (e.g., a concurrent SM Context Modification for another
+             * PDU session), subsequent cleanup requests may be incorrectly
+             * associated with that stream. When the unrelated stream closes,
+             * the pending transaction is canceled, leaving the PDU session
+             * stuck in smf_gsm_state_5gc_session_will_deregister.
+             *
+             * Explicitly clear the stream ID when no valid association exists
+             * to prevent confusing the transaction ID with a stream ID.
+             */
             if (sbi_xact->assoc_stream_id >= OGS_MIN_POOL_ID &&
                 sbi_xact->assoc_stream_id <= OGS_MAX_POOL_ID)
                 e->h.sbi.data = OGS_UINT_TO_POINTER(sbi_xact->assoc_stream_id);
+            else
+                e->h.sbi.data = OGS_UINT_TO_POINTER(OGS_INVALID_POOL_ID);
 
             e->h.sbi.state = sbi_xact->state;
 
@@ -1292,9 +1245,15 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
         case OGS_TIMER_NF_INSTANCE_HEARTBEAT_INTERVAL:
         case OGS_TIMER_NF_INSTANCE_NO_HEARTBEAT:
         case OGS_TIMER_NF_INSTANCE_VALIDITY:
-            nf_instance = e->h.sbi.data;
-            ogs_assert(nf_instance);
+            nf_instance = ogs_sbi_nf_instance_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!nf_instance) {
+                ogs_error("NF Instance has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
             ogs_assert(OGS_FSM_STATE(&nf_instance->sm));
+            e->h.sbi.data = nf_instance;
 
             ogs_sbi_self()->nf_instance->load = smf_instance_get_load();
 
@@ -1306,8 +1265,13 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
             break;
 
         case OGS_TIMER_SUBSCRIPTION_VALIDITY:
-            subscription_data = e->h.sbi.data;
-            ogs_assert(subscription_data);
+            subscription_data = ogs_sbi_subscription_data_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!subscription_data) {
+                ogs_error("Subscription has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
 
             ogs_error("[%s] Subscription validity expired",
                     subscription_data->id ?
@@ -1322,8 +1286,13 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
             break;
 
         case OGS_TIMER_SUBSCRIPTION_PATCH:
-            subscription_data = e->h.sbi.data;
-            ogs_assert(subscription_data);
+            subscription_data = ogs_sbi_subscription_data_find_by_pool_id(
+                    OGS_POINTER_TO_UINT(e->h.sbi.data));
+            if (!subscription_data) {
+                ogs_error("Subscription has already been removed [%d]",
+                        (int)OGS_POINTER_TO_UINT(e->h.sbi.data));
+                break;
+            }
 
             if (ogs_nnrf_nfm_send_nf_status_update(subscription_data) != true)
                 ogs_error("[%s] NF status subscription update failed",
@@ -1386,6 +1355,8 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
             ogs_assert(sbi_object_id >= OGS_MIN_POOL_ID &&
                     sbi_object_id <= OGS_MAX_POOL_ID);
 
+            service_name_id = sbi_xact->service_name;
+
             ogs_sbi_xact_remove(sbi_xact);
 
             sess = smf_sess_find_by_id(sbi_object_id);
@@ -1404,6 +1375,18 @@ void smf_state_operational(ogs_fsm_t *s, smf_event_t *e)
                         OGS_SBI_HTTP_STATUS_GATEWAY_TIMEOUT, NULL,
                         "Cannot receive SBI message", smf_ue->supi, NULL));
             }
+
+            /*
+             * [Issue #4878]
+             *
+             * The AMF did not answer the N1N2 transfer of the PDU Session
+             * Establishment Reject. Nothing is left to do for the reject,
+             * so release the session as the answer would have done.
+             * Otherwise the session is never released.
+             */
+            if (service_name_id == OpenAPI_service_name_namf_comm &&
+                OGS_FSM_CHECK(&sess->sm, smf_gsm_state_5gc_n1_n2_reject))
+                SMF_SESS_CLEAR(sess);
             break;
 
         default:

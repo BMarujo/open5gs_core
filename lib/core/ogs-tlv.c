@@ -334,21 +334,22 @@ ogs_tlv_t *ogs_tlv_add(ogs_tlv_t *head, uint8_t mode,
 
     new = ogs_tlv_get();
     ogs_assert(new);
-    if(length != 0)
-        ogs_assert(value);
 
     new->mode = mode;
     new->type = type;
     new->length = length;
     new->instance = instance;
-    new->value = value;
+    new->value = length ? value : NULL;
 
-    if (head != NULL && head->buff_allocated == true) {
-        ogs_assert((head->buff_ptr - head->buff + length) < head->buff_len);
+    if(length > 0) {
+        ogs_assert(value);
+        if (head != NULL && head->buff_allocated == true) {
+            ogs_assert((head->buff_ptr - head->buff + length) < head->buff_len);
 
-        memcpy(head->buff_ptr, value, length);
-        new->value = head->buff_ptr;
-        head->buff_ptr += length;
+            memcpy(head->buff_ptr, value, length);
+            new->value = head->buff_ptr;
+            head->buff_ptr += length;
+        }
     }
 
     if(curr == NULL) {
@@ -442,7 +443,8 @@ uint32_t ogs_tlv_render(ogs_tlv_t *root, void *data, uint32_t length)
             if ((pos - blk) + ogs_tlv_length(curr) > length)
                 ogs_assert_if_reached();
 
-            memcpy((char*)pos, (char*)curr->value, curr->length);
+            if (curr->length > 0)
+                memcpy((char*)pos, (char*)curr->value, curr->length);
             pos += curr->length;
         } else {
             embedded_len = ogs_tlv_calc_length(curr->embedded);

@@ -24,6 +24,7 @@
 
 #include "ogs-s1ap.h"
 #include "ogs-diameter-s6a.h"
+#include "ogs-diameter-s13.h"
 #include "ogs-gtp.h"
 #include "ogs-nas-eps.h"
 #include "ogs-app.h"
@@ -74,6 +75,24 @@ typedef struct served_gummei_s {
     int             num_of_mme_code;
     uint8_t         mme_code[CODE_PER_MME];
 } served_gummei_t;
+
+/* Control EIR (S13) functionality */
+typedef struct mme_eir_s {
+    bool enabled;
+    const char  *host;
+    const char  *realm;
+
+    /* Whitelisted and greylisted equipment is always allowed, blacklisted
+     * always rejected (no knob, as in the AMF). Only "unknown to the EIR"
+     * (DIAMETER_ERROR_EQUIPMENT_UNKNOWN) is operator policy. */
+    ogs_eir_action_e unknown_action;
+
+    uint32_t    timeout;             /* s, ECR answer deadline. On expiry
+                                       * failure_action applies. 0 = none */
+    ogs_eir_action_e failure_action;  /* No verdict: EIR unreachable, error
+                                       * answer, or no answer within timeout */
+    ogs_eir_action_e missing_pei_action; /* no usable IMEISV to check */
+} mme_eir_t;
 
 typedef struct mme_context_s {
     const char          *diam_conf_path;  /* MME Diameter conf path */
@@ -185,6 +204,7 @@ typedef struct mme_context_s {
     struct {
         const char *dnn;            /* Emergency APN */
     } emergency;
+    mme_eir_t eir;     /* Control EIR functionality */
 } mme_context_t;
 
 typedef struct mme_sgsn_route_s {
@@ -399,6 +419,10 @@ struct sgw_ue_s {
 };
 
 typedef struct mme_ue_memento_s {
+    /* NAS key identifiers changed by an unauthenticated Attach. */
+    uint8_t ue_ksi, ue_tsc;
+    uint8_t mme_ksi, mme_tsc;
+
     /* UE network capability info: supported network features. */
     ogs_nas_ue_network_capability_t ue_network_capability;
     /* MS network capability info: supported network features. */
@@ -476,6 +500,9 @@ struct mme_ue_s {
 #define MME_EPS_TYPE_DETACH_REQUEST_TO_UE           6
         uint8_t     type;
 
+        /* mme identifies the stored EPS NAS security context. ue records
+         * the received identifier; short Service Request infers its TSC
+         * from the current context because the message carries only KSI. */
         struct {
         ED3(uint8_t tsc:1;,
             uint8_t ksi:3;,
@@ -525,6 +552,14 @@ struct mme_ue_s {
     char            imeisv_bcd[OGS_MAX_IMEISV_BCD_LEN+1];
     ogs_nas_mobile_identity_imeisv_t nas_mobile_identity_imeisv;
 
+    /*
+     * EIR (S13): ME identity check of the current attach. The id is
+     * carried by the ECR and must match on the answer, so that a late
+     * ECA of a cancelled or replaced procedure is ignored.
+     */
+    bool        eir_check_pending;
+    uint32_t    eir_check_id;
+
     uint8_t         msisdn[OGS_MAX_MSISDN_LEN];
     int             msisdn_len;
     char            msisdn_bcd[OGS_MAX_MSISDN_BCD_LEN+1];
@@ -543,6 +578,9 @@ struct mme_ue_s {
         ogs_timer_t     *t_gn_holding;
         ogs_pool_id_t   gtp_xact_id; /* 2g->4g SGSN Context Req/Resp/Ack gtp1c xact */
     } gn;
+
+    /* Received TAU identity, separate from the pending GUTI allocation. */
+    ogs_nas_eps_guti_t old_guti;
 
     struct {
 #define MME_NEXT_GUTI_IS_AVAILABLE(__mME) ((__mME)->next.m_tmsi)
@@ -581,7 +619,7 @@ struct mme_ue_s {
     ((__mME) && \
     ((__mME)->security_context_available == 1) && \
      ((__mME)->mac_failed == 0) && \
-     ((__mME)->nas_eps.ue.ksi != OGS_NAS_KSI_NO_KEY_IS_AVAILABLE))
+     ((__mME)->nas_eps.mme.ksi != OGS_NAS_KSI_NO_KEY_IS_AVAILABLE))
 #define CLEAR_SECURITY_CONTEXT(__mME) \
     do { \
         ogs_assert((__mME)); \
@@ -596,6 +634,9 @@ struct mme_ue_s {
 
     /* flag: 1 = allow restoration of context, 0 = disallow */
     bool            can_restore_context;
+
+    /* Authenticated Attach waiting for the old PDN sessions to be deleted. */
+    bool            attach_session_delete_pending;
 
     /*
      * ue_context_will_remove:
@@ -1017,6 +1058,7 @@ typedef struct mme_sess_s {
     /* Related Context */
     ogs_pool_id_t   mme_ue_id;
 
+    /* Owned PDN configuration, independent of the UE subscription list. */
     ogs_session_t   *session;
 
     /* PDN Address Allocation (PAA) */
@@ -1246,6 +1288,8 @@ typedef enum {
 sgw_relocation_e sgw_ue_check_if_relocated(mme_ue_t *mme_ue);
 
 void mme_ue_new_guti(mme_ue_t *mme_ue);
+void mme_ue_publish_next_guti(mme_ue_t *mme_ue);
+void mme_ue_unpublish_next_guti(mme_ue_t *mme_ue);
 void mme_ue_confirm_guti(mme_ue_t *mme_ue);
 
 #define INVALID_P_TMSI 0
@@ -1268,7 +1312,8 @@ mme_ue_t *mme_ue_find_by_guti(const ogs_nas_eps_guti_t *nas_guti);
 mme_ue_t *mme_ue_find_by_s11_local_teid(uint32_t teid);
 mme_ue_t *mme_ue_find_by_gn_local_teid(uint32_t teid);
 
-mme_ue_t *mme_ue_find_by_message(const ogs_nas_eps_message_t *message);
+mme_ue_t *mme_ue_find_by_message(
+        const ogs_nas_eps_message_t *message, bool *pending_guti);
 
 /* Which procedure supplied the IMSI - logged at the OLD UE context
  * migration, so we can tell which callers actually reach it. */
@@ -1352,6 +1397,7 @@ void sgw_ue_source_deassociate_target(sgw_ue_t *sgw_ue);
 mme_sess_t *mme_sess_add(mme_ue_t *mme_ue, uint8_t pti);
 void mme_sess_remove(mme_sess_t *sess);
 void mme_sess_remove_all(mme_ue_t *mme_ue);
+void mme_sess_set_session(mme_sess_t *sess, const ogs_session_t *session);
 mme_sess_t *mme_sess_find_by_pti(const mme_ue_t *mme_ue, uint8_t pti);
 mme_sess_t *mme_sess_find_by_ebi(const mme_ue_t *mme_ue, uint8_t ebi);
 mme_sess_t *mme_sess_find_by_apn(const mme_ue_t *mme_ue, const char *apn);

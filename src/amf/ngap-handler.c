@@ -838,6 +838,16 @@ void ngap_handle_initial_ue_message(amf_gnb_t *gnb, ogs_ngap_message_t *message)
      * or associate this RAN UE with the AMF UE.
      */
     if (amf_ue) {
+        if (amf_ue->registration_session_release_pending) {
+            ogs_error("[%s] Ignore new NG context while registration session "
+                    "release is pending", amf_ue->supi);
+            r = ngap_send_ran_ue_context_release_command(ran_ue,
+                    NGAP_Cause_PR_nas, NGAP_CauseNas_normal_release,
+                    NGAP_UE_CTX_REL_NG_CONTEXT_REMOVE, 0);
+            ogs_expect(r == OGS_OK);
+            ogs_assert(r != OGS_ERROR);
+            return;
+        }
         /* If NAS(amf_ue_t) has already been associated with
          * older NG(ran_ue_t) context */
         if (CM_CONNECTED(amf_ue)) {
@@ -1071,7 +1081,7 @@ void ngap_handle_ue_radio_capability_info_indication(
         amf_gnb_t *gnb, ogs_ngap_message_t *message)
 {
     char buf[OGS_ADDRSTRLEN];
-    int i, r;
+    int i;
 
     ran_ue_t *ran_ue = NULL;
     amf_ue_t *amf_ue = NULL;
@@ -1128,13 +1138,12 @@ void ngap_handle_ue_radio_capability_info_indication(
             (long long)ran_ue->ran_ue_ngap_id,
             (long long)ran_ue->amf_ue_ngap_id);
 
+    /*
+     * TS 38.413 9.2.13.1 and 10.3.5: UE Radio Capability has assigned
+     * criticality "ignore"; ignore its absence without notifying the sender.
+     */
     if (!UERadioCapability) {
-        ogs_error("No UERadioCapability");
-        r = ngap_send_error_indication(
-                gnb, &ran_ue->ran_ue_ngap_id, &ran_ue->amf_ue_ngap_id,
-                NGAP_Cause_PR_protocol, NGAP_CauseProtocol_semantic_error);
-        ogs_expect(r == OGS_OK);
-        ogs_assert(r != OGS_ERROR);
+        ogs_error("No UERadioCapability IE; ignoring the indication");
         return;
     }
 
@@ -3732,6 +3741,8 @@ void ngap_handle_handover_required(
         return;
     }
 
+    amf_ue->ho_attempted++;
+
     target_ue = ran_ue_find_by_id(source_ue->target_ue_id);
     if (target_ue) {
     /*
@@ -4303,6 +4314,11 @@ void ngap_handle_handover_failure(
     ogs_debug("    Cause[Group:%d Cause:%d]",
             Cause->present, (int)Cause->choice.radioNetwork);
 
+    if (source_ue->amf_ue_id != OGS_INVALID_POOL_ID) {
+        amf_ue_t *failed_ue = amf_ue_find_by_id(source_ue->amf_ue_id);
+        if (failed_ue) failed_ue->ho_rejected++;
+    }
+
     r = ngap_send_handover_preparation_failure(source_ue, Cause);
     ogs_expect(r == OGS_OK);
     ogs_assert(r != OGS_ERROR);
@@ -4434,6 +4450,7 @@ void ngap_handle_handover_cancel(
         return;
     }
     amf_ue = amf_ue_find_by_id(source_ue->amf_ue_id);
+    if (amf_ue) amf_ue->ho_rejected++;
     if (!amf_ue) {
         ogs_error("Cannot find AMF-UE Context [%lld]",
                 (long long)amf_ue_ngap_id);
@@ -4830,6 +4847,8 @@ void ngap_handle_handover_notification(
     ogs_debug("    Target : TAC[%d] CellID[0x%llx]",
         target_ue->saved.nr_tai.tac.v,
         (long long)target_ue->saved.nr_cgi.cell_id);
+
+    amf_ue->ho_completed++;
 
     /* Copy Stream-No/TAI/ECGI from ran_ue */
     amf_ue->gnb_ostream_id = target_ue->gnb_ostream_id;

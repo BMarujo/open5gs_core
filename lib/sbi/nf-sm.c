@@ -153,11 +153,19 @@ void ogs_sbi_nf_fsm_fini(ogs_sbi_nf_instance_t *nf_instance)
 
     if (NF_INSTANCE_TYPE_IS_NRF(nf_instance) &&
         OGS_FSM_CHECK(&nf_instance->sm, ogs_sbi_nf_state_registered)) {
-        ogs_assert(true ==
+        ogs_expect(true ==
                 ogs_nnrf_nfm_send_nf_de_register(nf_instance));
     }
 
     ogs_fsm_fini(&nf_instance->sm, &e);
+}
+
+void ogs_sbi_nf_fsm_fini_all(void)
+{
+    ogs_sbi_nf_instance_t *nf_instance = NULL;
+
+    ogs_list_for_each(&ogs_sbi_self()->nf_instance_list, nf_instance)
+        ogs_sbi_nf_fsm_fini(nf_instance);
 }
 
 void ogs_sbi_nf_state_initial(ogs_fsm_t *s, ogs_event_t *e)
@@ -173,16 +181,20 @@ void ogs_sbi_nf_state_initial(ogs_fsm_t *s, ogs_event_t *e)
     ogs_assert(nf_instance);
 
     nf_instance->t_registration_interval = ogs_timer_add(ogs_app()->timer_mgr,
-            ogs_timer_nf_instance_registration_interval, nf_instance);
+            ogs_timer_nf_instance_registration_interval,
+            OGS_UINT_TO_POINTER(nf_instance->pool_id));
     ogs_assert(nf_instance->t_registration_interval);
     nf_instance->t_heartbeat_interval = ogs_timer_add(ogs_app()->timer_mgr,
-            ogs_timer_nf_instance_heartbeat_interval, nf_instance);
+            ogs_timer_nf_instance_heartbeat_interval,
+            OGS_UINT_TO_POINTER(nf_instance->pool_id));
     ogs_assert(nf_instance->t_heartbeat_interval);
     nf_instance->t_no_heartbeat = ogs_timer_add(ogs_app()->timer_mgr,
-            ogs_timer_nf_instance_no_heartbeat, nf_instance);
+            ogs_timer_nf_instance_no_heartbeat,
+            OGS_UINT_TO_POINTER(nf_instance->pool_id));
     ogs_assert(nf_instance->t_no_heartbeat);
     nf_instance->t_validity = ogs_timer_add(ogs_app()->timer_mgr,
-            ogs_timer_nf_instance_validity, nf_instance);
+            ogs_timer_nf_instance_validity,
+            OGS_UINT_TO_POINTER(nf_instance->pool_id));
     ogs_assert(nf_instance->t_validity);
 
     if (NF_INSTANCE_TYPE_IS_NRF(nf_instance)) {

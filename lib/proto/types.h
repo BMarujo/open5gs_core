@@ -153,6 +153,8 @@ extern "C" {
 #define OGS_NAS_PDU_SESSION_IDENTITY_MAX 255
 
 bool ogs_pdu_session_id_is_valid(int psi);
+/* Return unassigned for malformed or out-of-range decimal input. */
+int ogs_pdu_session_id_from_string(const char *str);
 
 #define OGS_ACCESS_TYPE_3GPP 1
 #define OGS_ACCESS_TYPE_NON_3GPP 2
@@ -287,6 +289,7 @@ typedef struct ogs_guami_s {
 
 uint32_t ogs_amf_id_hexdump(const ogs_amf_id_t *amf_id);
 
+/* Return NULL for malformed hex without changing amf_id. */
 ogs_amf_id_t *ogs_amf_id_from_string(ogs_amf_id_t *amf_id, const char *hex);
 char *ogs_amf_id_to_string(const ogs_amf_id_t *amf_id);
 
@@ -317,6 +320,13 @@ bool ogs_id_get_type_value(const char *str, char **type, char **value);
 /* Numeric validation logs the reason for invalid input at WARNING level. */
 bool ogs_bcd_string_is_valid(const char *bcd, int max_len);
 /*
+ * Check len ASCII decimal digits without requiring a NUL terminator.
+ * NULL or invalid input returns false; an embedded NUL is not a digit.
+ * The caller supplies positive minimum/maximum digit counts.
+ */
+bool ogs_bcd_string_is_valid_n(
+        const char *bcd, size_t len, int min_len, int max_len);
+/*
  * Check "<type>-<decimal digits>" without allocation.
  * NULL or malformed input logs a warning and returns false.
  * Bounds apply to the digit count;
@@ -324,8 +334,16 @@ bool ogs_bcd_string_is_valid(const char *bcd, int max_len);
  */
 bool ogs_id_bcd_is_valid(
         const char *str, const char *type, int min_len, int max_len);
+/* Supported PEIs: imei- with 15 digits or imeisv- with 16 digits. */
+bool ogs_pei_is_valid(const char *pei);
 bool ogs_imsi_bcd_is_valid(const char *imsi_bcd);
 bool ogs_imeisv_bcd_is_valid(const char *imeisv_bcd);
+/*
+ * Require non-empty type and value separated by exactly one '-'.
+ * IMSI values must also pass ogs_imsi_bcd_is_valid().
+ * Other types retain structural validation only. NULL returns false.
+ */
+bool ogs_supi_is_valid(const char *supi);
 int ogs_supi_to_imsi_bcd(
         const char *supi, char *imsi_bcd, bool *imsi_supi);
 
@@ -820,7 +838,7 @@ ED3(uint8_t ext:1;,
 } ogs_pco_t;
 
 int ogs_pco_parse(ogs_pco_t *pco, unsigned char *data, int data_len);
-int ogs_pco_build(unsigned char *data, int data_len, ogs_pco_t *pco);
+int ogs_pco_build(unsigned char *data, unsigned int data_len, const ogs_pco_t *pco);
 
 /*
  * PFCP Specification
@@ -1179,6 +1197,8 @@ typedef struct ogs_trigger_point_s {
 typedef struct ogs_application_server_s {
     const char *server_name;
     int        default_handling;
+    bool       include_register_request;
+    bool       include_register_response;
 } ogs_application_server_t;
 
 /**************************************************
@@ -1221,6 +1241,9 @@ typedef struct ogs_ims_data_s {
 } ogs_ims_data_t;
 
 void ogs_ims_data_free(ogs_ims_data_t *ims_data);
+
+bool ogs_media_is_signalling_path_status(
+        ogs_media_component_t *media_component);
 
 int ogs_pcc_rule_num_of_flow_equal_to_media(
         ogs_pcc_rule_t *pcc_rule, ogs_media_component_t *media_component);

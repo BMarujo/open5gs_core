@@ -42,11 +42,15 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
     ogs_sbi_response_t *response = NULL;
 
     char hxres_star_string[OGS_KEYSTRLEN(OGS_MAX_RES_LEN)];
+    uint8_t rand[OGS_RAND_LEN];
+    uint8_t xres_star[OGS_MAX_RES_LEN];
+    uint8_t kausf[OGS_SHA256_DIGEST_SIZE];
 
     OpenAPI_authentication_info_result_t *AuthenticationInfoResult = NULL;
     OpenAPI_authentication_vector_t *AuthenticationVector = NULL;
     OpenAPI_ue_authentication_ctx_t UeAuthenticationCtx;
-    OpenAPI_ue_authentication_ctx_5g_auth_data_t AV5G_AKA;
+    OpenAPI_ue_authentication_ctx_5g_auth_data_t AuthData;
+    OpenAPI_av5g_aka_t AV5G_AKA;
     OpenAPI_map_t *LinksValueScheme = NULL;
     OpenAPI_links_value_schema_t LinksValueSchemeValue;
 
@@ -158,12 +162,28 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
         return false;
     }
 
-    if (!AuthenticationInfoResult->supi) {
-        ogs_error("[%s] No AuthenticationVector.supi", ausf_ue->suci);
+    if (ogs_supi_is_valid(AuthenticationInfoResult->supi) == false) {
+        ogs_error("[%s] Invalid AuthenticationInfoResult.supi", ausf_ue->suci);
         ogs_assert(true ==
             ogs_sbi_server_send_error(stream,
                 OGS_SBI_HTTP_STATUS_BAD_REQUEST,
-                recvmsg, "No AuthenticationVector.supi", ausf_ue->suci,
+                recvmsg, "Invalid AuthenticationInfoResult.supi",
+                ausf_ue->suci, NULL));
+        return false;
+    }
+
+    if (ogs_hex_from_string_checked(
+                AuthenticationVector->rand, rand, sizeof(rand)) != OGS_OK ||
+        ogs_hex_from_string_checked(
+                AuthenticationVector->xres_star,
+                xres_star, sizeof(xres_star)) != OGS_OK ||
+        ogs_hex_from_string_checked(
+                AuthenticationVector->kausf, kausf, sizeof(kausf)) != OGS_OK) {
+        ogs_error("[%s] Invalid AuthenticationVector", ausf_ue->suci);
+        ogs_assert(true ==
+            ogs_sbi_server_send_error(stream,
+                OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                recvmsg, "Invalid AuthenticationVector", ausf_ue->suci,
                 NULL));
         return false;
     }
@@ -181,18 +201,9 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
 
     ausf_ue->auth_type = AuthenticationInfoResult->auth_type;
 
-    ogs_ascii_to_hex(
-        AuthenticationVector->rand,
-        strlen(AuthenticationVector->rand),
-        ausf_ue->rand, sizeof(ausf_ue->rand));
-    ogs_ascii_to_hex(
-        AuthenticationVector->xres_star,
-        strlen(AuthenticationVector->xres_star),
-        ausf_ue->xres_star, sizeof(ausf_ue->xres_star));
-    ogs_ascii_to_hex(
-        AuthenticationVector->kausf,
-        strlen(AuthenticationVector->kausf),
-        ausf_ue->kausf, sizeof(ausf_ue->kausf));
+    memcpy(ausf_ue->rand, rand, sizeof(ausf_ue->rand));
+    memcpy(ausf_ue->xres_star, xres_star, sizeof(ausf_ue->xres_star));
+    memcpy(ausf_ue->kausf, kausf, sizeof(ausf_ue->kausf));
 
     memset(&UeAuthenticationCtx, 0, sizeof(UeAuthenticationCtx));
 
@@ -208,7 +219,9 @@ bool ausf_nudm_ueau_handle_get(ausf_ue_t *ausf_ue,
             hxres_star_string, sizeof(hxres_star_string));
     AV5G_AKA.hxres_star = hxres_star_string;
 
-    UeAuthenticationCtx._5g_auth_data = &AV5G_AKA;
+    memset(&AuthData, 0, sizeof(AuthData));
+    AuthData.av5g_aka = &AV5G_AKA;
+    UeAuthenticationCtx._5g_auth_data = &AuthData;
 
     memset(&LinksValueSchemeValue, 0, sizeof(LinksValueSchemeValue));
 

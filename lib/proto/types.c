@@ -246,7 +246,10 @@ ogs_amf_id_t *ogs_amf_id_from_string(ogs_amf_id_t *amf_id, const char *hex)
     ogs_assert(amf_id);
     ogs_assert(hex);
 
-    ogs_hex_from_string(hex, hexbuf, sizeof(hexbuf));
+    if (ogs_hex_from_string_checked(hex, hexbuf, sizeof(hexbuf)) != OGS_OK) {
+        ogs_error("Invalid AMF ID [%s]", hex);
+        return NULL;
+    }
 
     amf_id->region = hexbuf[0];
     amf_id->set1 = hexbuf[1];
@@ -400,10 +403,18 @@ cleanup:
     return false;
 }
 
-static bool bcd_string_is_valid(
-        const char *bcd, int min_len, int max_len)
+bool ogs_bcd_string_is_valid_n(
+        const char *bcd, size_t len, int min_len, int max_len)
 {
-    size_t i, len = strlen(bcd);
+    size_t i;
+
+    ogs_assert(min_len > 0);
+    ogs_assert(max_len >= min_len);
+
+    if (!bcd) {
+        ogs_warn("Missing BCD string");
+        return false;
+    }
 
     if (len < (size_t)min_len || len > (size_t)max_len) {
         ogs_warn("Invalid BCD string length [%zu], expected [%d..%d]",
@@ -427,7 +438,7 @@ bool ogs_bcd_string_is_valid(const char *bcd, int max_len)
     ogs_assert(bcd);
     ogs_assert(max_len > 0);
 
-    return bcd_string_is_valid(bcd, 1, max_len);
+    return ogs_bcd_string_is_valid_n(bcd, strlen(bcd), 1, max_len);
 }
 
 bool ogs_id_bcd_is_valid(
@@ -450,13 +461,55 @@ bool ogs_id_bcd_is_valid(
         return false;
     }
 
-    return bcd_string_is_valid(str + type_len + 1, min_len, max_len);
+    str += type_len + 1;
+    return ogs_bcd_string_is_valid_n(str, strlen(str), min_len, max_len);
+}
+
+bool ogs_pei_is_valid(const char *pei)
+{
+    if (!pei) {
+        ogs_warn("Missing equipment identity");
+        return false;
+    }
+
+    if (!strncmp(pei, OGS_ID_PEI_TYPE_IMEI "-",
+                sizeof(OGS_ID_PEI_TYPE_IMEI "-") - 1))
+        return ogs_id_bcd_is_valid(pei, OGS_ID_PEI_TYPE_IMEI,
+                OGS_MAX_IMEI_BCD_LEN, OGS_MAX_IMEI_BCD_LEN);
+
+    if (!strncmp(pei, OGS_ID_SUPI_TYPE_IMEISV "-",
+                sizeof(OGS_ID_SUPI_TYPE_IMEISV "-") - 1))
+        return ogs_id_bcd_is_valid(pei, OGS_ID_SUPI_TYPE_IMEISV,
+                OGS_MAX_IMEISV_BCD_LEN, OGS_MAX_IMEISV_BCD_LEN);
+
+    ogs_warn("Unsupported PEI type; expected imei- or imeisv-");
+    return false;
 }
 
 bool ogs_pdu_session_id_is_valid(int psi)
 {
     return psi > OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED &&
            psi <= OGS_NAS_PDU_SESSION_IDENTITY_MAX;
+}
+
+int ogs_pdu_session_id_from_string(const char *str)
+{
+    int psi = OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+
+    if (!str || !*str)
+        return OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+
+    for (; *str; str++) {
+        if (*str < '0' || *str > '9')
+            return OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+
+        /* Bound each step so even an arbitrarily long input cannot overflow. */
+        psi = psi * 10 + (*str - '0');
+        if (psi > OGS_NAS_PDU_SESSION_IDENTITY_MAX)
+            return OGS_NAS_PDU_SESSION_IDENTITY_UNASSIGNED;
+    }
+
+    return psi;
 }
 
 /*
@@ -473,19 +526,39 @@ bool ogs_imeisv_bcd_is_valid(const char *imeisv_bcd)
     return ogs_bcd_string_is_valid(imeisv_bcd, OGS_MAX_IMEISV_BCD_LEN);
 }
 
+bool ogs_supi_is_valid(const char *supi)
+{
+    bool valid = true;
+    char *type = NULL, *value = NULL;
+
+    if (!supi) {
+        ogs_warn("Missing SUPI");
+        return false;
+    }
+
+    if (ogs_id_get_type_value(supi, &type, &value) == false)
+        return false;
+
+    if (strcmp(type, OGS_ID_SUPI_TYPE_IMSI) == 0)
+        valid = ogs_imsi_bcd_is_valid(value);
+
+    ogs_free(type);
+    ogs_free(value);
+
+    return valid;
+}
+
 /*
  * Return the decimal IMSI string only for IMSI-type SUPI.  Other SUPI
  * types cannot be used as EPC IMSI keys and remain SUPI-only.
  *
- * Return OGS_ERROR only when the SUPI claims to be IMSI-type but the
- * IMSI payload is malformed.  That must not fall back to SUPI-only.
+ * Return OGS_ERROR for malformed SUPIs. On failure or for a non-IMSI
+ * SUPI, leave imsi_bcd untouched and set imsi_supi to false.
  */
 int ogs_supi_to_imsi_bcd(
         const char *supi, char *imsi_bcd, bool *imsi_supi)
 {
-    int rv = OGS_ERROR;
-    char *type = NULL;
-    char *value = NULL;
+    const size_t imsi_prefix_len = sizeof(OGS_ID_SUPI_TYPE_IMSI "-") - 1;
 
     ogs_assert(supi);
     ogs_assert(imsi_bcd);
@@ -493,33 +566,21 @@ int ogs_supi_to_imsi_bcd(
 
     *imsi_supi = false;
 
-    if (ogs_id_get_type_value(supi, &type, &value) == false) {
+    if (ogs_supi_is_valid(supi) == false) {
         ogs_error("Invalid SUPI [%s]", supi);
-        goto cleanup;
+        return OGS_ERROR;
     }
 
     /* Non-IMSI SUPI is valid, but has no EPC IMSI alias. */
-    if (strcmp(type, OGS_ID_SUPI_TYPE_IMSI) != 0) {
-        rv = OGS_OK;
-        goto cleanup;
-    }
+    if (strncmp(supi, OGS_ID_SUPI_TYPE_IMSI "-", imsi_prefix_len) != 0)
+        return OGS_OK;
 
-    if (ogs_imsi_bcd_is_valid(value) == false) {
-        ogs_error("Invalid IMSI SUPI [%s]", supi);
-        goto cleanup;
-    }
-
-    ogs_cpystrn(imsi_bcd, value, OGS_MAX_IMSI_BCD_LEN+1);
+    /* Validation bounds the IMSI length; allow overlapping input/output. */
+    memmove(imsi_bcd, supi + imsi_prefix_len,
+            strlen(supi + imsi_prefix_len) + 1);
     *imsi_supi = true;
-    rv = OGS_OK;
 
-cleanup:
-    if (type)
-        ogs_free(type);
-    if (value)
-        ogs_free(value);
-
-    return rv;
+    return OGS_OK;
 }
 
 char *ogs_s_nssai_sd_to_string(const ogs_uint24_t sd)
@@ -682,7 +743,6 @@ int ogs_fqdn_parse(char *dst, const char *src, int length)
  * 10.5.6.3 Protocol configuration options in 3GPP TS 24.008 */
 int ogs_pco_parse(ogs_pco_t *pco, unsigned char *data, int data_len)
 {
-    ogs_pco_t *source = (ogs_pco_t *)data;
     int size = 0;
     int i = 0;
 
@@ -697,8 +757,8 @@ int ogs_pco_parse(ogs_pco_t *pco, unsigned char *data, int data_len)
         return -EINVAL;
     }
 
-    pco->ext = source->ext;
-    pco->configuration_protocol = source->configuration_protocol;
+    pco->ext = *data >> 7;
+    pco->configuration_protocol = *data & 0x7;
     size++;
 
     while(size < data_len && i < OGS_MAX_NUM_OF_PROTOCOL_OR_CONTAINER_ID) {
@@ -746,38 +806,38 @@ int ogs_pco_parse(ogs_pco_t *pco, unsigned char *data, int data_len)
 
     return size;
 }
-int ogs_pco_build(unsigned char *data, int data_len, ogs_pco_t *pco)
+int ogs_pco_build(unsigned char *data, unsigned int data_len, const ogs_pco_t *pco)
 {
-    ogs_pco_t target;
-    int size = 0;
-    int i = 0;
+    unsigned int i;
+    unsigned int size;
 
     ogs_assert(pco);
     ogs_assert(data);
-    ogs_assert(data_len);
 
-    memcpy(&target, pco, sizeof(ogs_pco_t));
+    if (data_len < 1)
+        return -ENOBUFS;
 
-    ogs_assert(size + 1 <= data_len);
-    memcpy(data + size, &target, 1);
-    size += 1;
+    memcpy(data, pco, 1);
+    size = 1;
 
-    ogs_assert(target.num_of_id <= OGS_MAX_NUM_OF_PROTOCOL_OR_CONTAINER_ID);
-    for (i = 0; i < target.num_of_id; i++) {
-        ogs_pco_id_t *id = &target.ids[i];
+    ogs_assert(pco->num_of_id <= OGS_MAX_NUM_OF_PROTOCOL_OR_CONTAINER_ID);
+    for (i = 0; i < pco->num_of_id; i++) {
+        const ogs_pco_id_t *id = &pco->ids[i];
+        const uint16_t id_val = htobe16(id->id);
 
-        ogs_assert(size + sizeof(id->id) <= data_len);
-        id->id = htobe16(id->id);
-        memcpy(data + size, &id->id, sizeof(id->id));
-        size += sizeof(id->id);
+        if (size + sizeof(id_val) + sizeof(id->len) + id->len > data_len)
+            return -ENOBUFS;
 
-        ogs_assert(size + sizeof(id->len) <= data_len);
+        memcpy(data + size, &id_val, sizeof(id_val));
+        size += sizeof(id_val);
+
         memcpy(data + size, &id->len, sizeof(id->len));
         size += sizeof(id->len);
 
-        ogs_assert(size + id->len <= data_len);
-        memcpy(data + size, id->data, id->len);
-        size += id->len;
+        if (id->len > 0) {
+            memcpy(data + size, id->data, id->len);
+            size += id->len;
+        }
     }
 
     return size;
@@ -958,13 +1018,16 @@ int ogs_ipv6addr_from_string(uint8_t *addr6, const char *string)
 
 int ogs_ipv6prefix_from_string(uint8_t *addr6, uint8_t *prefixlen, const char *string)
 {
-    int rv;
+    int rv = OGS_ERROR;
     ogs_sockaddr_t tmp;
     char *v = NULL, *pv = NULL, *ipstr = NULL, *mask_or_numbits = NULL;
+    char *endptr = NULL;
+    long bits;
 
     ogs_assert(addr6);
     ogs_assert(prefixlen);
     ogs_assert(string);
+
     pv = v = ogs_strdup(string);
     if (!v) {
         ogs_error("ogs_strdup() failed");
@@ -972,26 +1035,35 @@ int ogs_ipv6prefix_from_string(uint8_t *addr6, uint8_t *prefixlen, const char *s
     }
 
     ipstr = strsep(&v, "/");
-    if (ipstr)
-        mask_or_numbits = v;
+    mask_or_numbits = v;
 
     if (!ipstr || !mask_or_numbits) {
-        ogs_error("Invalid IPv6 Prefix string = %s", v);
-        ogs_free(v);
-        return OGS_ERROR;
+        ogs_error("Invalid IPv6 Prefix string = %s", string);
+        goto cleanup;
     }
 
-    rv = ogs_inet_pton(AF_INET6, ipstr, &tmp);
-    if (rv != OGS_OK) {
-        ogs_error("ogs_inet_pton() failed");
-        return rv;
+    if (ogs_inet_pton(AF_INET6, ipstr, &tmp) != OGS_OK) {
+        ogs_error("ogs_inet_pton() failed [%s]", string);
+        goto cleanup;
+    }
+
+    /* The prefix length is narrowed into a uint8_t, so out-of-range values
+     * from a peer would wrap (e.g. /384 -> /128) and slip past callers that
+     * gate on an exact length. Parse and range-check it like ogs_ipsubnet(). */
+    bits = strtol(mask_or_numbits, &endptr, 10);
+    if (*mask_or_numbits == '\0' || *endptr != '\0' ||
+            bits < 0 || bits > OGS_IPV6_128_PREFIX_LEN) {
+        ogs_error("Invalid IPv6 prefix length [%s]", string);
+        goto cleanup;
     }
 
     memcpy(addr6, tmp.sin6.sin6_addr.s6_addr, OGS_IPV6_LEN);
-    *prefixlen = atoi(mask_or_numbits);
+    *prefixlen = (uint8_t)bits;
+    rv = OGS_OK;
 
+cleanup:
     ogs_free(pv);
-    return OGS_OK;
+    return rv;
 }
 
 int ogs_check_br_conf(ogs_bitrate_t *br)
@@ -1126,6 +1198,32 @@ void ogs_ims_data_free(ogs_ims_data_t *ims_data)
             }
         }
     }
+}
+
+/*
+ * TS29.214 4.4.5, TS29.514 4.2.6.7
+ * Subscription to Notification of Signalling Path Status
+ *
+ * Media component number 0 with a single AF signalling sub-component
+ * whose flow number is 0. The rest of the attributes shall not be used,
+ * and the PCC rules for AF signalling are expected to be provisioned
+ * already, so no PCC rule is derived from this media component.
+ */
+bool ogs_media_is_signalling_path_status(
+        ogs_media_component_t *media_component)
+{
+    ogs_media_sub_component_t *sub = NULL;
+
+    ogs_assert(media_component);
+
+    if (media_component->media_component_number != 0 ||
+        media_component->num_of_sub != 1)
+        return false;
+
+    sub = &media_component->sub[0];
+
+    return sub->flow_number == 0 &&
+        sub->flow_usage == OGS_FLOW_USAGE_AF_SIGNALLING;
 }
 
 static int flow_rx_to_gx(ogs_flow_t *rx_flow, ogs_flow_t *gx_flow)

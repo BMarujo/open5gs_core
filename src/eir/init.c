@@ -18,6 +18,7 @@
  */
 
 #include "sbi-path.h"
+#include "eir-fd-path.h"
 
 static ogs_thread_t *thread;
 static void eir_main(void *data);
@@ -67,6 +68,17 @@ int eir_initialize(void)
         ogs_warn("EIR database constraints could not be prepared; "
                 "continuing with runtime validation");
 
+    /* S13 towards the MME, out of the same eir collection */
+    if (eir_self()->s13_enabled) {
+        rv = eir_fd_init();
+        if (rv != OGS_OK) {
+            ogs_error("Failed to initialize EIR Diameter S13 [%d]", rv);
+            return rv;
+        }
+    } else {
+        ogs_info("S13 is not served: no eir.freeDiameter configuration");
+    }
+
     rv = eir_sbi_open();
     if (rv != OGS_OK) {
         ogs_error("Failed to open EIR SBI [%d]", rv);
@@ -84,40 +96,18 @@ int eir_initialize(void)
     return OGS_OK;
 }
 
-static ogs_timer_t *t_termination_holding = NULL;
-
-static void event_termination(void)
-{
-    ogs_sbi_nf_instance_t *nf_instance = NULL;
-
-    /* Sending NF Instance De-registration to NRF */
-    ogs_list_for_each(&ogs_sbi_self()->nf_instance_list, nf_instance)
-        ogs_sbi_nf_fsm_fini(nf_instance);
-
-    /* Gracefully shutdown the server by sending GOAWAY to each session. */
-    ogs_sbi_server_graceful_shutdown_all();
-
-    /* Starting holding timer */
-    t_termination_holding = ogs_timer_add(ogs_app()->timer_mgr, NULL, NULL);
-    ogs_assert(t_termination_holding);
-#define TERMINATION_HOLDING_TIME ogs_time_from_msec(300)
-    ogs_timer_start(t_termination_holding, TERMINATION_HOLDING_TIME);
-
-    /* Sending termination event to the queue */
-    ogs_queue_term(ogs_app()->queue);
-    ogs_pollset_notify(ogs_app()->pollset);
-}
-
 void eir_terminate(void)
 {
     if (!initialized) return;
 
-    /* Daemon terminating */
-    event_termination();
+    ogs_queue_term(ogs_app()->queue);
+    ogs_pollset_notify(ogs_app()->pollset);
     ogs_thread_destroy(thread);
-    ogs_timer_delete(t_termination_holding);
 
     eir_sbi_close();
+
+    if (eir_self()->s13_enabled)
+        eir_fd_final();
 
     ogs_dbi_final();
 
@@ -168,6 +158,7 @@ static void eir_main(void *data)
         }
     }
 done:
-
+    ogs_sbi_nf_fsm_fini_all();
+    ogs_sbi_graceful_shutdown();
     ogs_fsm_fini(&eir_sm, 0);
 }

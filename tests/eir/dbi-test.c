@@ -23,6 +23,7 @@
 #define TEST_EIR_IMEI "imei-490154203237518"
 #define TEST_EIR_SUPI "imsi-001010123456789"
 #define TEST_EIR_OTHER_SUPI "imsi-001010987654321"
+#define COMMON_FIXTURE_PEI "imeisv-8665070409405301"
 
 #define GENERIC(status) \
     "{\"pei\":\"" TEST_EIR_PEI "\",\"status\":\"" status "\"}"
@@ -162,22 +163,17 @@ static bool fixture_begin(abts_case *tc)
 {
     bson_error_t error;
     bson_t *query = BCON_NEW("pei", "{", "$in", "[",
-            BCON_UTF8(TEST_EIR_PEI), BCON_UTF8(TEST_EIR_IMEI), "]", "}");
-    int64_t count;
+            BCON_UTF8(TEST_EIR_PEI), BCON_UTF8(TEST_EIR_IMEI),
+            BCON_UTF8(COMMON_FIXTURE_PEI), "]", "}");
+    bool removed;
 
-#if MONGOC_CHECK_VERSION(1, 11, 0)
-    count = mongoc_collection_count_documents(
-            ogs_mongoc()->collection.eir, query, NULL, NULL, NULL, &error);
-#else
-    count = mongoc_collection_count(ogs_mongoc()->collection.eir,
-            MONGOC_QUERY_NONE, query, 0, 0, NULL, &error);
-#endif
-
+    /* Recover fixtures left by an interrupted run, including per-SUPI rows. */
+    removed = mongoc_collection_delete_many(
+            ogs_mongoc()->collection.eir, query, NULL, NULL, &error);
     bson_destroy(query);
-    if (count != 0)
-        ABTS_FAIL(tc, count < 0 ? error.message :
-                "EIR DB fixture PEI already exists; existing records kept");
-    return count == 0;
+    if (!removed)
+        ABTS_FAIL(tc, error.message);
+    return removed;
 }
 
 static bool fixture_write(abts_case *tc, fixture_t *fixture,
@@ -227,6 +223,39 @@ static void fixture_end(abts_case *tc, fixture_t *fixture)
             ABTS_FAIL(tc, error.message);
         bson_destroy(query);
     }
+}
+
+static void recover_interrupted_fixture(abts_case *tc, void *data)
+{
+    fixture_t fixture = {0};
+    ogs_dbi_eir_record_t record;
+    int rv;
+
+    if (!fixture_begin(tc))
+        return;
+    if (!fixture_insert(tc, &fixture, GENERIC("WHITELISTED"), NULL) ||
+            !fixture_insert(tc, &fixture, SPECIFIC("BLACKLISTED"), NULL) ||
+            !fixture_insert(tc, &fixture,
+                "{\"pei\":\"" TEST_EIR_IMEI
+                "\",\"status\":\"WHITELISTED\"}", NULL))
+        goto cleanup;
+
+    /* Start the next case without running the previous case's cleanup. */
+    if (!fixture_begin(tc) || !fixture_begin(tc))
+        goto cleanup;
+
+    rv = ogs_dbi_eir_check_equipment(NULL, TEST_EIR_PEI, &record);
+    ABTS_INT_EQUAL(tc, OGS_NOTFOUND, rv);
+    ogs_dbi_eir_record_free(&record);
+    rv = ogs_dbi_eir_check_equipment(TEST_EIR_SUPI, TEST_EIR_PEI, &record);
+    ABTS_INT_EQUAL(tc, OGS_NOTFOUND, rv);
+    ogs_dbi_eir_record_free(&record);
+    rv = ogs_dbi_eir_check_equipment(NULL, TEST_EIR_IMEI, &record);
+    ABTS_INT_EQUAL(tc, OGS_NOTFOUND, rv);
+    ogs_dbi_eir_record_free(&record);
+
+cleanup:
+    fixture_end(tc, &fixture);
 }
 
 static void equipment_lookup(abts_case *tc, void *data)
@@ -380,16 +409,154 @@ cleanup:
     fixture_end(tc, &fixture);
 }
 
+static test_ue_t *common_fixture_ue(unsigned int index)
+{
+    ogs_nas_5gs_mobile_identity_suci_t suci = {0};
+    test_ue_t *ue;
+    char msin[11];
+
+    suci.h.supi_format = OGS_NAS_5GS_SUPI_FORMAT_IMSI;
+    suci.h.type = OGS_NAS_5GS_MOBILE_IDENTITY_SUCI;
+    suci.routing_indicator2 = suci.routing_indicator3 =
+        suci.routing_indicator4 = 0xf;
+    ogs_snprintf(msin, sizeof(msin), "00004709%02u", index);
+    ue = test_ue_add_by_suci(&suci, msin);
+    ogs_assert(ue);
+    ue->k_string = "465b5ce8b199b49faa5f0a2ee238a6bc";
+    ue->opc_string = "e8ed289deba952e4283b54e88e6183ca";
+    /* Ensure provisioning uses the actual identity, not the default PEI. */
+    ue->mobile_identity_imeisv.digit10 = 9;
+    return ue;
+}
+
+static void common_fixture_status(abts_case *tc, test_ue_t *ue,
+        ogs_dbi_eir_status_t expected)
+{
+    ogs_dbi_eir_record_t record;
+    int rv = ogs_dbi_eir_check_equipment(ue->supi, COMMON_FIXTURE_PEI, &record);
+
+    ABTS_INT_EQUAL(tc, expected == OGS_DBI_EIR_STATUS_UNKNOWN ?
+            OGS_NOTFOUND : OGS_OK, rv);
+    ABTS_INT_EQUAL(tc, expected, record.status);
+    ogs_dbi_eir_record_free(&record);
+}
+
+static void common_equipment_fixture(abts_case *tc, void *data)
+{
+    fixture_t fixture = {0};
+    test_ue_t *ue[4] = {NULL};
+    unsigned int i;
+
+    if (!fixture_insert(tc, &fixture,
+                "{\"pei\":\"" COMMON_FIXTURE_PEI
+                "\",\"status\":\"BLACKLISTED\"}", NULL))
+        goto cleanup;
+    for (i = 0; i < OGS_ARRAY_SIZE(ue); i++) {
+        /* Two contexts share one pair; a third UE shares only its PEI. */
+        ue[i] = common_fixture_ue(i == 1 ? 0 : i);
+        ABTS_INT_EQUAL(tc, 15, strlen(ue[i]->imsi));
+        ABTS_INT_EQUAL(tc, OGS_OK, i == 3 ?
+                test_db_insert_subscriber(ue[i], test_db_new_simple(ue[i])) :
+                test_db_insert_ue(ue[i], test_db_new_simple(ue[i])));
+        if (tc->failed)
+            goto cleanup;
+        common_fixture_status(tc, ue[i], i == 3 ?
+                OGS_DBI_EIR_STATUS_BLACKLISTED : OGS_DBI_EIR_STATUS_WHITELISTED);
+        if (i != 3)
+            ABTS_TRUE(tc, ue[i]->mobile_identity_imeisv_presence);
+    }
+    /* Removing one owner must retain the other context's equipment record. */
+    ABTS_INT_EQUAL(tc, OGS_OK, test_db_remove_ue(ue[0]));
+    common_fixture_status(tc, ue[1], OGS_DBI_EIR_STATUS_WHITELISTED);
+    ABTS_INT_EQUAL(tc, OGS_OK, test_db_remove_ue(ue[1]));
+    common_fixture_status(tc, ue[1], OGS_DBI_EIR_STATUS_BLACKLISTED);
+    common_fixture_status(tc, ue[2], OGS_DBI_EIR_STATUS_WHITELISTED);
+    /* Finalization removes remaining owned pairs, not the generic record. */
+    ABTS_INT_EQUAL(tc, OGS_OK, test_db_cleanup_eir());
+    common_fixture_status(tc, ue[2], OGS_DBI_EIR_STATUS_BLACKLISTED);
+    common_fixture_status(tc, ue[3], OGS_DBI_EIR_STATUS_BLACKLISTED);
+
+cleanup:
+    for (i = 0; i < OGS_ARRAY_SIZE(ue); i++) {
+        if (ue[i]) {
+            ABTS_INT_EQUAL(tc, OGS_OK, test_db_remove_ue(ue[i]));
+            test_ue_remove(ue[i]);
+        }
+    }
+    fixture_end(tc, &fixture);
+}
+
+static void common_fixture_ownership(abts_case *tc, void *data)
+{
+    test_ue_t *ue = common_fixture_ue(4);
+    bson_oid_t foreign_id;
+    bson_error_t error;
+    bson_t *document, *query;
+    char *owned_id;
+    bool inserted;
+
+    owned_id = ogs_msprintf("open5gs-test-eir:%s:%s", COMMON_FIXTURE_PEI, ue->supi);
+    /* Recover a record left by an interrupted run without a live UE owner. */
+    document = BCON_NEW("_id", BCON_UTF8(owned_id),
+            "pei", BCON_UTF8(COMMON_FIXTURE_PEI),
+            "supi", BCON_UTF8(ue->supi), "status", BCON_UTF8("BLACKLISTED"));
+    inserted = mongoc_collection_insert_one(
+            ogs_mongoc()->collection.eir, document, NULL, NULL, &error);
+    bson_destroy(document);
+    ABTS_TRUE(tc, inserted);
+    if (!inserted)
+        goto cleanup;
+    ABTS_INT_EQUAL(tc, OGS_OK, test_db_insert_ue(ue, test_db_new_simple(ue)));
+    common_fixture_status(tc, ue, OGS_DBI_EIR_STATUS_WHITELISTED);
+    ABTS_INT_EQUAL(tc, OGS_OK, test_db_remove_ue(ue));
+    common_fixture_status(tc, ue, OGS_DBI_EIR_STATUS_UNKNOWN);
+
+    /* A different owner must not be overwritten, even to allow this UE. */
+    bson_oid_init(&foreign_id, NULL);
+    document = BCON_NEW("_id", BCON_OID(&foreign_id),
+            "pei", BCON_UTF8(COMMON_FIXTURE_PEI),
+            "supi", BCON_UTF8(ue->supi), "status", BCON_UTF8("BLACKLISTED"));
+    inserted = mongoc_collection_insert_one(
+            ogs_mongoc()->collection.eir, document, NULL, NULL, &error);
+    bson_destroy(document);
+    ABTS_TRUE(tc, inserted);
+    if (inserted) {
+        ABTS_INT_EQUAL(tc, OGS_ERROR, test_db_insert_ue(ue, test_db_new_simple(ue)));
+        common_fixture_status(tc, ue, OGS_DBI_EIR_STATUS_BLACKLISTED);
+        query = BCON_NEW("imsi", BCON_UTF8(ue->imsi));
+        ABTS_INT_EQUAL(tc, 0, mongoc_collection_count_documents(
+                    ogs_mongoc()->collection.subscriber, query,
+                    NULL, NULL, NULL, &error));
+        bson_destroy(query);
+        query = BCON_NEW("_id", BCON_OID(&foreign_id));
+        ABTS_TRUE(tc, mongoc_collection_delete_one(
+                    ogs_mongoc()->collection.eir, query, NULL, NULL, &error));
+        bson_destroy(query);
+    }
+
+cleanup:
+    ABTS_INT_EQUAL(tc, OGS_OK, test_db_remove_ue(ue));
+    query = BCON_NEW("_id", BCON_UTF8(owned_id));
+    ABTS_TRUE(tc, mongoc_collection_delete_one(
+                ogs_mongoc()->collection.eir, query, NULL, NULL, &error));
+    bson_destroy(query);
+    ogs_free(owned_id);
+    test_ue_remove(ue);
+}
+
 abts_suite *test_eir_dbi(abts_suite *suite)
 {
     unsigned int i;
 
     suite = ADD_SUITE(suite)
+    abts_run_test(suite, recover_interrupted_fixture, NULL);
     for (i = 0; i < OGS_ARRAY_SIZE(write_cases); i++)
         abts_run_test(suite, database_constraints, (void *)&write_cases[i]);
     abts_run_test(suite, repeated_database_init, NULL);
     for (i = 0; i < OGS_ARRAY_SIZE(lookup_cases); i++)
         abts_run_test(suite, equipment_lookup, (void *)&lookup_cases[i]);
     abts_run_test(suite, invalid_pair_does_not_fall_back, NULL);
+    abts_run_test(suite, common_equipment_fixture, NULL);
+    abts_run_test(suite, common_fixture_ownership, NULL);
     return suite;
 }

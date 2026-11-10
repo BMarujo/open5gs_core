@@ -1634,6 +1634,18 @@ smf_sess_t *smf_sess_add_by_gtp1_message(ogs_gtp1_message_t *message)
         ogs_error("No IMSI");
         return NULL;
     }
+
+    /* Validate the peer's IMSI before the hash lookup, whose key must be
+     * nonempty, and before removing any context selected by that key. */
+    if (req->imsi.len == 0 || req->imsi.len > OGS_MAX_IMSI_LEN) {
+        ogs_error("Invalid IMSI length [%u], expected [1..%d]",
+                req->imsi.len, OGS_MAX_IMSI_LEN);
+        return NULL;
+    }
+    if (!req->imsi.data) {
+        ogs_error("Missing IMSI data [len:%u]", req->imsi.len);
+        return NULL;
+    }
     if (req->tunnel_endpoint_identifier_data_i.presence == 0) {
         ogs_error("No Tunnel Endpoint Identifier Data I");
         return NULL;
@@ -1716,6 +1728,18 @@ smf_sess_t *smf_sess_add_by_gtp2_message(ogs_gtp2_message_t *message)
 
     if (req->imsi.presence == 0) {
         ogs_error("No IMSI");
+        return NULL;
+    }
+
+    /* Validate the peer's IMSI before the hash lookup, whose key must be
+     * nonempty, and before removing any context selected by that key. */
+    if (req->imsi.len == 0 || req->imsi.len > OGS_MAX_IMSI_LEN) {
+        ogs_error("Invalid IMSI length [%u], expected [1..%d]",
+                req->imsi.len, OGS_MAX_IMSI_LEN);
+        return NULL;
+    }
+    if (!req->imsi.data) {
+        ogs_error("Missing IMSI data [len:%u]", req->imsi.len);
         return NULL;
     }
     if (req->access_point_name.presence == 0) {
@@ -3450,7 +3474,8 @@ static bool smf_pco_id_add(
     return true;
 }
 
-int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
+int smf_pco_build(uint8_t *pco_buf, int pco_buf_len,
+        uint8_t *buffer, int length)
 {
     int rv;
     ogs_pco_t ue, smf;
@@ -3463,7 +3488,7 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
     ogs_ipsubnet_t dns_primary, dns_secondary, dns6_primary, dns6_secondary;
     ogs_ipsubnet_t p_cscf, p_cscf6;
     int size = 0;
-    int i = 0;
+    int i = 0, num_of_id = 0;
     uint16_t mtu = 0;
 
     ogs_assert(pco_buf);
@@ -3688,7 +3713,31 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length)
         }
     }
 
-    size = ogs_pco_build(pco_buf, OGS_MAX_PCO_LEN, &smf);
+    /*
+     * The reply size follows the UE's request (one PAP reply with the
+     * welcome string per PAP request), so leave out the containers that
+     * do not fit the caller's buffer: OGS_MAX_PCO_LEN for PCO/APCO
+     * (TS 24.008 10.5.6.3), OGS_MAX_EPCO_LEN for ePCO (10.5.6.3A).
+     * ogs_pco_build() asserts on a short buffer.
+     */
+    size = 1;
+    for (i = 0; i < smf.num_of_id; i++) {
+        int container = sizeof(smf.ids[i].id) + sizeof(smf.ids[i].len) +
+                smf.ids[i].len;
+
+        if (size + container > pco_buf_len) {
+            ogs_error("PCO/EPCO response container does not fit "
+                    "[id:0x%x len:%d size:%d capacity:%d]",
+                    smf.ids[i].id, smf.ids[i].len, size, pco_buf_len);
+            continue;
+        }
+
+        smf.ids[num_of_id++] = smf.ids[i];
+        size += container;
+    }
+    smf.num_of_id = num_of_id;
+
+    size = ogs_pco_build(pco_buf, pco_buf_len, &smf);
     ogs_expect(size > 0);
     return size;
 }

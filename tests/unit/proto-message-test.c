@@ -143,6 +143,63 @@ static void identity_format(abts_case *tc, void *data)
                 test->min_len, test->max_len) == test->valid);
 }
 
+static void pei_format(abts_case *tc, void *data)
+{
+    static const struct {
+        const char *value;
+        bool valid;
+    } cases[] = {
+        { "imei-490154203237518", true },
+        { "imeisv-4901542032375186", true },
+        { NULL, false },
+        { "", false },
+        { "imei", false },
+        { "imeisv-", false },
+        { "imei-49015420323751", false },
+        { "imei-4901542032375186", false },
+        { "imeisv-490154203237518", false },
+        { "imeisv-49015420323751860", false },
+        { "imei-49015420323751x", false },
+        { "imeisv-490154203237518x", false },
+        { "imsi-490154203237518", false },
+        { "IMEI-490154203237518", false },
+        { "imei-490154203237518-1", false },
+        { "imeisv-4901542032375186 ", false },
+    };
+    size_t i;
+
+    for (i = 0; i < OGS_ARRAY_SIZE(cases); i++)
+        ABTS_ASSERT(tc, cases[i].value ? cases[i].value : "NULL PEI",
+                ogs_pei_is_valid(cases[i].value) == cases[i].valid);
+}
+
+static void bcd_explicit_length(abts_case *tc, void *data)
+{
+    const char digits[] = { '0', '0', '1' };
+    const char suffix[] = { '0', '1', 'x' };
+    const char embedded_nul[] = { '0', '\0', '1' };
+    const char invalid_byte[] = { '0', '\xff', '1' };
+
+    /* The supplied span need not be terminated and may end before a suffix. */
+    ABTS_TRUE(tc, ogs_bcd_string_is_valid_n(digits, sizeof(digits), 3, 3));
+    ABTS_TRUE(tc, ogs_bcd_string_is_valid_n(suffix, 2, 1, 3));
+    ABTS_TRUE(tc, !ogs_bcd_string_is_valid_n(suffix, sizeof(suffix), 1, 3));
+
+    /* Check both inclusive bounds and reject lengths outside them. */
+    ABTS_TRUE(tc, ogs_bcd_string_is_valid_n(digits, 1, 1, 3));
+    ABTS_TRUE(tc, ogs_bcd_string_is_valid_n(digits, 3, 1, 3));
+    ABTS_TRUE(tc, !ogs_bcd_string_is_valid_n(digits, 2, 3, 3));
+    ABTS_TRUE(tc, !ogs_bcd_string_is_valid_n(digits, 3, 1, 2));
+    ABTS_TRUE(tc, !ogs_bcd_string_is_valid_n(digits, 0, 1, 3));
+
+    ABTS_TRUE(tc, !ogs_bcd_string_is_valid_n(NULL, 0, 1, 3));
+    ABTS_TRUE(tc, !ogs_bcd_string_is_valid_n(NULL, 3, 1, 3));
+    ABTS_TRUE(tc, !ogs_bcd_string_is_valid_n(
+                embedded_nul, sizeof(embedded_nul), 1, 3));
+    ABTS_TRUE(tc, !ogs_bcd_string_is_valid_n(
+                invalid_byte, sizeof(invalid_byte), 1, 3));
+}
+
 static void legacy_identity_bounds(abts_case *tc, void *data)
 {
     /* Keep the existing BCD APIs' nonempty, maximum-length-only contract. */
@@ -164,6 +221,77 @@ static void legacy_identity_bounds(abts_case *tc, void *data)
     ABTS_TRUE(tc, !ogs_imeisv_bcd_is_valid(""));
     ABTS_TRUE(tc, !ogs_imeisv_bcd_is_valid("49015420323751860"));
     ABTS_TRUE(tc, !ogs_imeisv_bcd_is_valid("490154203237518x"));
+}
+
+static void supi_validation(abts_case *tc, void *data)
+{
+    static const struct {
+        const char *supi;
+        int result;
+        const char *imsi;
+    } cases[] = {
+        { "", OGS_ERROR, NULL },
+        { "1234567890", OGS_ERROR, NULL },
+        { "imsi", OGS_ERROR, NULL },
+        { "-1", OGS_ERROR, NULL },
+        { "imsi-", OGS_ERROR, NULL },
+        { "imsi--1", OGS_ERROR, NULL },
+        { "imsi-1-2", OGS_ERROR, NULL },
+        { "imsi-1-", OGS_ERROR, NULL },
+        { "imsi-abc", OGS_ERROR, NULL },
+        { "imsi-+1", OGS_ERROR, NULL },
+        { "imsi-1 ", OGS_ERROR, NULL },
+        { "imsi-\xff", OGS_ERROR, NULL },
+        { "imsi-0010101234567890", OGS_ERROR, NULL },
+        { "imsi-1", OGS_OK, "1" },
+        { "imsi-001010123456789", OGS_OK, "001010123456789" },
+        { "nai-user@example.org", OGS_OK, NULL },
+        { "unknown-value", OGS_OK, NULL },
+        { "imsiX-abc", OGS_OK, NULL },
+        { "nai-user-name@example.org", OGS_ERROR, NULL },
+    };
+    size_t i;
+    char imsi_bcd[OGS_MAX_IMSI_BCD_LEN+1];
+    char unchanged[sizeof(imsi_bcd)];
+    bool imsi_supi;
+
+    ABTS_TRUE(tc, !ogs_supi_is_valid(NULL));
+    memset(unchanged, 0x5a, sizeof(unchanged));
+
+    for (i = 0; i < OGS_ARRAY_SIZE(cases); i++) {
+        ABTS_TRUE(tc, ogs_supi_is_valid(cases[i].supi) ==
+                (cases[i].result == OGS_OK));
+
+        memcpy(imsi_bcd, unchanged, sizeof(imsi_bcd));
+        imsi_supi = true;
+        ABTS_INT_EQUAL(tc, cases[i].result,
+                ogs_supi_to_imsi_bcd(cases[i].supi, imsi_bcd, &imsi_supi));
+        ABTS_TRUE(tc, imsi_supi == (cases[i].imsi != NULL));
+        if (cases[i].imsi)
+            ABTS_STR_EQUAL(tc, cases[i].imsi, imsi_bcd);
+        else
+            ABTS_TRUE(tc,
+                    memcmp(imsi_bcd, unchanged, sizeof(imsi_bcd)) == 0);
+    }
+}
+
+static void supi_imsi_overlap(abts_case *tc, void *data)
+{
+    char supi[32];
+    bool imsi_supi = false;
+
+    ogs_cpystrn(supi, "imsi-001010123456789", sizeof(supi));
+    ABTS_INT_EQUAL(tc, OGS_OK,
+            ogs_supi_to_imsi_bcd(supi, supi, &imsi_supi));
+    ABTS_TRUE(tc, imsi_supi);
+    ABTS_STR_EQUAL(tc, "001010123456789", supi);
+
+    ogs_cpystrn(supi, "imsi-001010123456789", sizeof(supi));
+    imsi_supi = false;
+    ABTS_INT_EQUAL(tc, OGS_OK,
+            ogs_supi_to_imsi_bcd(supi, supi + 6, &imsi_supi));
+    ABTS_TRUE(tc, imsi_supi);
+    ABTS_STR_EQUAL(tc, "001010123456789", supi + 6);
 }
 
 static void framed_route_format(abts_case *tc, void *data)
@@ -297,6 +425,48 @@ static void framed_route_bounds(abts_case *tc, void *data)
     ogs_free(s);
 }
 
+static void ipv6prefix_format(abts_case *tc, void *data)
+{
+    uint8_t addr6[OGS_IPV6_LEN];
+    uint8_t prefixlen;
+    size_t i;
+    int id = ogs_log_get_domain_id("core");
+    ogs_log_level_e level = ogs_log_get_domain_level(id);
+
+    static const struct {
+        const char *string;
+        uint8_t prefixlen;
+    } valid[] = {
+        { "2001:db8::/128", 128 },
+        { "2001:db8::/64", 64 },
+        { "::/0", 0 },
+    };
+
+    /* A length past the end of the dotted range must not wrap into a
+     * valid-looking one; these all returned OGS_OK before the range check,
+     * with /384 narrowing to 128 and slipping past an exact-length caller. */
+    static const char *invalid[] = {
+        "2001:db8::/384", "2001:db8::/300", "2001:db8::/256",
+        "2001:db8::/-1", "2001:db8::/64junk", "2001:db8::/",
+        "2001:db8::", "notanip/64",
+    };
+
+    for (i = 0; i < OGS_ARRAY_SIZE(valid); i++) {
+        prefixlen = 0xff;
+        ABTS_INT_EQUAL(tc, OGS_OK,
+                ogs_ipv6prefix_from_string(addr6, &prefixlen, valid[i].string));
+        ABTS_INT_EQUAL(tc, valid[i].prefixlen, prefixlen);
+    }
+
+    /* Keep expected errors quiet unless debug/trace logging is requested. */
+    if (level >= OGS_LOG_ERROR && level < OGS_LOG_DEBUG)
+        ogs_log_set_domain_level(id, OGS_LOG_FATAL);
+    for (i = 0; i < OGS_ARRAY_SIZE(invalid); i++)
+        ABTS_INT_EQUAL(tc, OGS_ERROR,
+                ogs_ipv6prefix_from_string(addr6, &prefixlen, invalid[i]));
+    ogs_log_set_domain_level(id, level);
+}
+
 abts_suite *test_proto_message(abts_suite *suite)
 {
     size_t i;
@@ -307,11 +477,16 @@ abts_suite *test_proto_message(abts_suite *suite)
     abts_run_test(suite, proto_message_test2, NULL);
     for (i = 0; i < OGS_ARRAY_SIZE(identity_cases); i++)
         abts_run_test(suite, identity_format, (void *)&identity_cases[i]);
+    abts_run_test(suite, pei_format, NULL);
+    abts_run_test(suite, bcd_explicit_length, NULL);
     abts_run_test(suite, legacy_identity_bounds, NULL);
+    abts_run_test(suite, supi_validation, NULL);
+    abts_run_test(suite, supi_imsi_overlap, NULL);
     abts_run_test(suite, framed_route_format, NULL);
     abts_run_test(suite, framed_route_classful, NULL);
     abts_run_test(suite, framed_route_invalid, NULL);
     abts_run_test(suite, framed_route_bounds, NULL);
+    abts_run_test(suite, ipv6prefix_format, NULL);
 
     return suite;
 }

@@ -228,6 +228,11 @@ static int mme_context_prepare(void)
     self.dns.cache_ttl = 60;
     self.dns.guard_timeout = 3000;
 
+    self.eir.unknown_action     = OGS_EIR_ACTION_ALLOW;
+    self.eir.failure_action     = OGS_EIR_ACTION_ALLOW;
+    self.eir.missing_pei_action = OGS_EIR_ACTION_ALLOW;
+    self.eir.timeout            = 3;
+
     return OGS_OK;
 }
 
@@ -344,6 +349,14 @@ static int mme_context_validation(void)
                 (long long)self.time.t3423.value, ogs_app()->file);
         return OGS_ERROR;
     }
+
+    if (self.eir.enabled && self.eir.realm == NULL) {
+        ogs_error("No mme.eir.realm in '%s'", ogs_app()->file);
+        return OGS_ERROR;
+    }
+    if (self.eir.enabled && self.eir.timeout == 0)
+        ogs_warn("mme.eir.timeout is 0: an unresponsive EIR will never "
+                 "trigger failure_action");
 
     return OGS_OK;
 }
@@ -2493,6 +2506,38 @@ int mme_context_parse_config(void)
                     }
                 } else if (!strcmp(mme_key, "mme_name")) {
                     self.mme_name = ogs_yaml_iter_value(&mme_iter);
+                } else if (!strcmp(mme_key, "eir")) {
+                    ogs_yaml_iter_t eir_iter;
+                    ogs_yaml_iter_recurse(&mme_iter, &eir_iter);
+
+                    while (ogs_yaml_iter_next(&eir_iter)) {
+                        const char *eir_key = ogs_yaml_iter_key(&eir_iter);
+                        ogs_assert(eir_key);
+                        if (!strcmp(eir_key, "enabled")) {
+                            self.eir.enabled =
+                                ogs_yaml_iter_bool(&eir_iter);
+                        } else if (!strcmp(eir_key, "host")) {
+                            self.eir.host = ogs_yaml_iter_value(&eir_iter);
+                        } else if (!strcmp(eir_key, "realm")) {
+                            self.eir.realm = ogs_yaml_iter_value(&eir_iter);
+                        } else if (!strcmp(eir_key, "timeout")) {
+                            const char *v = ogs_yaml_iter_value(&eir_iter);
+                            if (v) self.eir.timeout = atoi(v);
+                        } else if (!strcmp(eir_key, "unknown_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.unknown_action);
+                            if (rv != OGS_OK) return rv;
+                        } else if (!strcmp(eir_key, "failure_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.failure_action);
+                            if (rv != OGS_OK) return rv;
+                        } else if (!strcmp(eir_key, "missing_pei_action")) {
+                            rv = ogs_app_parse_eir_action(&eir_iter,
+                                    eir_key, &self.eir.missing_pei_action);
+                            if (rv != OGS_OK) return rv;
+                        } else
+                            ogs_warn("unknown key `%s`", eir_key);
+                    }
                 } else if (!strcmp(mme_key, "time")) {
                     ogs_yaml_iter_t time_iter;
                     ogs_yaml_iter_recurse(&mme_iter, &time_iter);
@@ -3324,8 +3369,16 @@ int mme_enb_remove(mme_enb_t *enb)
 
     ogs_hash_set(self.enb_addr_hash,
             enb->sctp.addr, sizeof(ogs_sockaddr_t), NULL);
+
+    /*
+     * S1 Setup on a new SCTP association may have already replaced this ID
+     * while shutdown of the old association was still pending. Removing
+     * the old context must not erase the replacement's ID mapping. A false
+     * result only skips unindexing; the old context is still torn down.
+     */
     if (enb->enb_id_presence == true)
-        ogs_hash_set(self.enb_id_hash, &enb->enb_id, sizeof(enb->enb_id), NULL);
+        ogs_hash_unset_if_owner(self.enb_id_hash,
+                &enb->enb_id, sizeof(enb->enb_id), enb);
 
     /*
      * CHECK:
@@ -3372,10 +3425,22 @@ int mme_enb_set_enb_id(mme_enb_t *enb, uint32_t enb_id)
 {
     ogs_assert(enb);
 
+    /*
+     * Remove our previous ID before changing its key bytes, but leave it
+     * alone if another association has already taken over that mapping.
+     */
     if (enb->enb_id_presence == true)
-        ogs_hash_set(self.enb_id_hash, &enb->enb_id, sizeof(enb->enb_id), NULL);
+        ogs_hash_unset_if_owner(self.enb_id_hash,
+                &enb->enb_id, sizeof(enb->enb_id), enb);
 
     enb->enb_id = enb_id;
+
+    /*
+     * A reconnect can register the same eNB-ID before the old association's
+     * shutdown event is handled: the last registration wins. The hash keeps
+     * its own copy of the key, so freeing or reusing the old context does not
+     * break lookups (including handover target lookup).
+     */
     ogs_hash_set(self.enb_id_hash, &enb->enb_id, sizeof(enb->enb_id), enb);
 
     enb->enb_id_presence = true;
@@ -3700,6 +3765,28 @@ void mme_ue_new_guti(mme_ue_t *mme_ue)
     mme_ue->next.guti.m_tmsi = *(mme_ue->next.m_tmsi);
 }
 
+void mme_ue_publish_next_guti(mme_ue_t *mme_ue)
+{
+    ogs_assert(MME_NEXT_GUTI_IS_AVAILABLE(mme_ue));
+
+    if (ogs_hash_get(self.guti_ue_hash,
+            &mme_ue->next.guti, sizeof(mme_ue->next.guti)) == mme_ue)
+        return;
+
+    ogs_hash_set(self.guti_ue_hash,
+            &mme_ue->next.guti, sizeof(mme_ue->next.guti), mme_ue);
+    ogs_info("[%s] Pending GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+            mme_ue->imsi_bcd, mme_ue->next.guti.mme_gid,
+            mme_ue->next.guti.mme_code, mme_ue->next.guti.m_tmsi);
+}
+
+void mme_ue_unpublish_next_guti(mme_ue_t *mme_ue)
+{
+    if (MME_NEXT_GUTI_IS_AVAILABLE(mme_ue))
+        ogs_hash_unset_if_owner(self.guti_ue_hash,
+                &mme_ue->next.guti, sizeof(mme_ue->next.guti), mme_ue);
+}
+
 void mme_ue_confirm_guti(mme_ue_t *mme_ue)
 {
     ogs_assert(MME_NEXT_GUTI_IS_AVAILABLE(mme_ue));
@@ -3949,6 +4036,7 @@ mme_ue_t *mme_ue_add(enb_ue_t *enb_ue)
 
     /* Initialization */
     mme_ue->nas_eps.mme.ksi = OGS_NAS_KSI_NO_KEY_IS_AVAILABLE;
+    mme_ue->nas_eps.ue.ksi = OGS_NAS_KSI_NO_KEY_IS_AVAILABLE;
 
     mme_ue_fsm_init(mme_ue);
 
@@ -3990,6 +4078,7 @@ void mme_ue_remove(mme_ue_t *mme_ue)
     }
 
     if (MME_NEXT_GUTI_IS_AVAILABLE(mme_ue)) {
+        mme_ue_unpublish_next_guti(mme_ue);
         ogs_assert(mme_m_tmsi_free(mme_ue->next.m_tmsi) == OGS_OK);
     }
 
@@ -4093,12 +4182,30 @@ mme_ue_t *mme_ue_find_by_imsi(const uint8_t *imsi, int imsi_len)
     return (mme_ue_t *)ogs_hash_get(self.imsi_ue_hash, imsi, imsi_len);
 }
 
-mme_ue_t *mme_ue_find_by_guti(const ogs_nas_eps_guti_t *guti)
+static mme_ue_t *find_ue_by_guti(
+        const ogs_nas_eps_guti_t *guti, bool allow_pending, bool *pending_guti)
 {
+    mme_ue_t *mme_ue = NULL;
+
     ogs_assert(guti);
 
-    return (mme_ue_t *)ogs_hash_get(
-            self.guti_ue_hash, guti, sizeof(ogs_nas_eps_guti_t));
+    mme_ue = ogs_hash_get(self.guti_ue_hash, guti, sizeof(*guti));
+    if (!mme_ue || (MME_CURRENT_GUTI_IS_AVAILABLE(mme_ue) &&
+            memcmp(guti, &mme_ue->current.guti, sizeof(*guti)) == 0))
+        return mme_ue;
+
+    /* Only a NAS Attach Request may look up a pending GUTI. */
+    if (!allow_pending)
+        return NULL;
+
+    if (pending_guti)
+        *pending_guti = true;
+    return mme_ue;
+}
+
+mme_ue_t *mme_ue_find_by_guti(const ogs_nas_eps_guti_t *guti)
+{
+    return find_ue_by_guti(guti, false, NULL);
 }
 
 mme_ue_t *mme_ue_find_by_s11_local_teid(uint32_t teid)
@@ -4111,7 +4218,8 @@ mme_ue_t *mme_ue_find_by_gn_local_teid(uint32_t teid)
     return ogs_hash_get(self.mme_gn_teid_hash, &teid, sizeof(teid));
 }
 
-mme_ue_t *mme_ue_find_by_message(const ogs_nas_eps_message_t *message)
+mme_ue_t *mme_ue_find_by_message(
+        const ogs_nas_eps_message_t *message, bool *pending_guti)
 {
     mme_ue_t *mme_ue = NULL;
     const ogs_nas_eps_attach_request_t *attach_request = NULL;
@@ -4126,6 +4234,9 @@ mme_ue_t *mme_ue_find_by_message(const ogs_nas_eps_message_t *message)
     const ogs_nas_mobile_identity_tmsi_t *mobile_identity_tmsi = NULL;
     const served_gummei_t *served_gummei = NULL;
     ogs_nas_eps_guti_t ogs_nas_guti;
+
+    if (pending_guti)
+        *pending_guti = false;
 
     switch (message->emm.h.message_type) {
     case OGS_NAS_EPS_ATTACH_REQUEST:
@@ -4160,7 +4271,7 @@ mme_ue_t *mme_ue_find_by_message(const ogs_nas_eps_message_t *message)
             ogs_nas_guti.mme_code = eps_mobile_identity_guti->mme_code;
             ogs_nas_guti.m_tmsi = eps_mobile_identity_guti->m_tmsi;
 
-            mme_ue = mme_ue_find_by_guti(&ogs_nas_guti);
+            mme_ue = find_ue_by_guti(&ogs_nas_guti, true, pending_guti);
             if (mme_ue) {
                 ogs_info("[%s] Known UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
                         mme_ue->imsi_bcd,
@@ -4330,6 +4441,7 @@ int mme_ue_set_imsi(mme_ue_t *mme_ue, char *imsi_bcd,
     uint16_t target_bitmap_before = 0;
     bool target_had_imsi = false;
     char target_imsi_bcd[OGS_MAX_IMSI_BCD_LEN+1];
+    int i;
     ogs_assert(mme_ue && imsi_bcd);
 
     /*
@@ -4484,6 +4596,33 @@ int mme_ue_set_imsi(mme_ue_t *mme_ue, char *imsi_bcd,
 
             /* Phase-2 : Move Session Context from OLD to NEW MME-UE Context */
             ogs_assert(ogs_list_empty(&mme_ue->sess_list));
+
+            /*
+             * Preserve subscription data when migrating retained PDNs, even
+             * when the target already has a subscription but no PDNs.
+             *
+             * Keeping PDNs through GUTI re-attach authentication (#4577) also
+             * requires their APN data to survive old-UE removal. Commit
+             * d86e013f fixed this by transferring the subscription list and
+             * rebinding sess->session, which pointed into the old UE's array.
+             *
+             * mme_sess_set_session() now gives each PDN its own configuration
+             * and APN name. These allocations stay with the same PDN objects
+             * during migration, so pointer rebinding is no longer needed.
+             *
+             * The subscription list and default APN identifier must still
+             * move to the new UE. Free the target's previous subscription
+             * first, then clear the old count after the shallow copy so
+             * old-UE removal cannot free the transferred APN names.
+             */
+            ogs_assert(old_mme_ue->num_of_session <= OGS_MAX_NUM_OF_SESS);
+            mme_session_remove_all(mme_ue);
+            mme_ue->num_of_session = old_mme_ue->num_of_session;
+            mme_ue->context_identifier = old_mme_ue->context_identifier;
+            for (i = 0; i < mme_ue->num_of_session; i++) {
+                mme_ue->session[i] = old_mme_ue->session[i];
+            }
+            old_mme_ue->num_of_session = 0;
 
             memcpy(&mme_ue->sess_list,
                     &old_mme_ue->sess_list, sizeof(mme_ue->sess_list));
@@ -4844,6 +4983,8 @@ void mme_sess_remove(mme_sess_t *sess)
 
     mme_dns_sess_clear(sess);
 
+    mme_sess_set_session(sess, NULL);
+
     ogs_pool_id_free(&mme_sess_pool, sess);
 
     stats_remove_mme_session();
@@ -4861,6 +5002,41 @@ void mme_sess_remove_all(mme_ue_t *mme_ue)
 
         sess = next_sess;
     }
+}
+
+void mme_sess_set_session(mme_sess_t *sess, const ogs_session_t *session)
+{
+    ogs_session_t *new_session = NULL;
+
+    ogs_assert(sess);
+
+    if (session) {
+        ogs_assert(session->name);
+        new_session = ogs_calloc(1, sizeof(*new_session));
+        ogs_assert(new_session);
+        new_session->name = ogs_strdup(session->name);
+        ogs_assert(new_session->name);
+
+        /* Copy only the EPC fields populated by S6a/Gn. Framed routes are
+         * delivered directly to the SMF and are not owned by the MME. */
+        new_session->context_identifier = session->context_identifier;
+        new_session->session_type = session->session_type;
+        new_session->qos = session->qos;
+        new_session->ambr = session->ambr;
+        new_session->ue_ip = session->ue_ip;
+        new_session->smf_ip = session->smf_ip;
+        memcpy(new_session->charging_characteristics,
+                session->charging_characteristics,
+                sizeof(new_session->charging_characteristics));
+        new_session->charging_characteristics_presence =
+            session->charging_characteristics_presence;
+    }
+
+    if (sess->session) {
+        ogs_free(sess->session->name);
+        ogs_free(sess->session);
+    }
+    sess->session = new_session;
 }
 
 mme_sess_t *mme_sess_find_by_pti(const mme_ue_t *mme_ue, uint8_t pti)
@@ -5105,6 +5281,25 @@ mme_bearer_t *mme_bearer_find_or_add_by_message(
             "ESM message type:%d, PTI:%d, EBI:%d",
             message->esm.h.message_type, pti, ebi);
 
+    /*
+     * TS 24.301 7.3.2: a PDN DISCONNECT REQUEST carries no EPS bearer
+     * identity in its ESM header.  Checking it here, before the generic
+     * non-zero-EBI lookup below returns the named bearer, keeps an
+     * assigned or reserved header EBI (6.5.2.6 a) from selecting the
+     * default or a dedicated bearer and dispatching the disconnect on it.
+     */
+    if (message->esm.h.message_type == OGS_NAS_EPS_PDN_DISCONNECT_REQUEST &&
+            ebi != OGS_NAS_EPS_BEARER_IDENTITY_UNASSIGNED) {
+        ogs_error("PDN disconnect with EBI[%d] in the ESM header", ebi);
+        if (pti != OGS_NAS_PROCEDURE_TRANSACTION_IDENTITY_UNASSIGNED) {
+            r = nas_eps_send_pdn_disconnect_reject(mme_ue, pti,
+                    OGS_NAS_ESM_CAUSE_INVALID_EPS_BEARER_IDENTITY);
+            ogs_expect(r == OGS_OK);
+            ogs_assert(r != OGS_ERROR);
+        }
+        return NULL;
+    }
+
     if (ebi != OGS_NAS_EPS_BEARER_IDENTITY_UNASSIGNED) {
         bearer = mme_bearer_find_by_ue_ebi(mme_ue, ebi);
         if (!bearer) {
@@ -5142,9 +5337,26 @@ mme_bearer_t *mme_bearer_find_or_add_by_message(
         if (!bearer) {
             ogs_error("No Bearer : Linked-EBI[%d]",
                     linked_eps_bearer_identity->eps_bearer_identity);
-            r = nas_eps_send_attach_reject(enb_ue, mme_ue,
-                    OGS_NAS_EMM_CAUSE_PROTOCOL_ERROR_UNSPECIFIED,
-                    OGS_NAS_ESM_CAUSE_PROTOCOL_ERROR_UNSPECIFIED);
+            r = nas_eps_send_pdn_disconnect_reject(mme_ue, pti,
+                    OGS_NAS_ESM_CAUSE_INVALID_EPS_BEARER_IDENTITY);
+            ogs_expect(r == OGS_OK);
+            ogs_assert(r != OGS_ERROR);
+            return NULL;
+        }
+
+        /*
+         * TS 24.301 6.5.2.2: the Linked EBI of a PDN DISCONNECT REQUEST
+         * identifies the default bearer of the PDN connection.  A dedicated
+         * bearer here is an invalid EPS bearer identity and 6.5.2.6 says to
+         * answer with PDN DISCONNECT REJECT cause #43, not to dispatch the
+         * disconnect on the dedicated bearer's ESM state machine.
+         */
+        sess = mme_sess_find_by_id(bearer->sess_id);
+        if (!sess || mme_default_bearer_in_sess(sess) != bearer) {
+            ogs_error("PDN disconnect for non-default Linked-EBI[%d]",
+                    linked_eps_bearer_identity->eps_bearer_identity);
+            r = nas_eps_send_pdn_disconnect_reject(mme_ue, pti,
+                    OGS_NAS_ESM_CAUSE_INVALID_EPS_BEARER_IDENTITY);
             ogs_expect(r == OGS_OK);
             ogs_assert(r != OGS_ERROR);
             return NULL;
@@ -5333,6 +5545,7 @@ void mme_session_remove_all(mme_ue_t *mme_ue)
         if (mme_ue->session[i].name)
             ogs_free(mme_ue->session[i].name);
     }
+    memset(mme_ue->session, 0, sizeof(mme_ue->session));
 
     mme_ue->num_of_session = 0;
 }
@@ -5749,6 +5962,11 @@ void mme_ue_save_memento(mme_ue_t *mme_ue, mme_ue_memento_t *memento)
     ogs_assert(mme_ue);
     ogs_assert(memento);
 
+    memento->ue_ksi = mme_ue->nas_eps.ue.ksi;
+    memento->ue_tsc = mme_ue->nas_eps.ue.tsc;
+    memento->mme_ksi = mme_ue->nas_eps.mme.ksi;
+    memento->mme_tsc = mme_ue->nas_eps.mme.tsc;
+
     memcpy(&memento->ue_network_capability,
             &mme_ue->ue_network_capability,
             sizeof(memento->ue_network_capability));
@@ -5786,6 +6004,11 @@ void mme_ue_restore_memento(mme_ue_t *mme_ue, const mme_ue_memento_t *memento)
 {
     ogs_assert(mme_ue);
     ogs_assert(memento);
+
+    mme_ue->nas_eps.ue.ksi = memento->ue_ksi;
+    mme_ue->nas_eps.ue.tsc = memento->ue_tsc;
+    mme_ue->nas_eps.mme.ksi = memento->mme_ksi;
+    mme_ue->nas_eps.mme.tsc = memento->mme_tsc;
 
     memcpy(&mme_ue->ue_network_capability,
             &memento->ue_network_capability,

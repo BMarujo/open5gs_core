@@ -67,7 +67,8 @@ bool ausf_nausf_auth_handle_authenticate(ausf_ue_t *ausf_ue,
             ausf_nudm_ueau_build_get,
             ausf_ue, stream, AuthenticationInfo->resynchronization_info);
     ogs_expect(r == OGS_OK);
-    ogs_assert(r != OGS_ERROR);
+    if (r != OGS_OK)
+        return false;
 
     return true;
 }
@@ -77,7 +78,7 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
 {
     OpenAPI_confirmation_data_t *ConfirmationData = NULL;
     char *res_star_string = NULL;
-    uint8_t res_star[OGS_KEYSTRLEN(OGS_MAX_RES_LEN)];
+    uint8_t res_star[OGS_MAX_RES_LEN];
     int r;
 
     ogs_assert(ausf_ue);
@@ -102,8 +103,15 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
         return false;
     }
 
-    ogs_ascii_to_hex(res_star_string, strlen(res_star_string),
-            res_star, sizeof(res_star));
+    if (ogs_hex_from_string_checked(
+                res_star_string, res_star, sizeof(res_star)) != OGS_OK) {
+        ogs_error("[%s] Invalid ConfirmationData.resStar", ausf_ue->suci);
+        ogs_assert(true ==
+            ogs_sbi_server_send_error(stream, OGS_SBI_HTTP_STATUS_BAD_REQUEST,
+                recvmsg, "Invalid ConfirmationData.resStar", ausf_ue->suci,
+                NULL));
+        return false;
+    }
 
     if (memcmp(res_star, ausf_ue->xres_star, OGS_MAX_RES_LEN) != 0) {
         ogs_log_hexdump(OGS_LOG_WARN, res_star, OGS_MAX_RES_LEN);
@@ -119,7 +127,8 @@ bool ausf_nausf_auth_handle_authenticate_confirmation(ausf_ue_t *ausf_ue,
             ausf_nudm_ueau_build_result_confirmation_inform,
             ausf_ue, stream, NULL);
     ogs_expect(r == OGS_OK);
-    ogs_assert(r != OGS_ERROR);
+    if (r != OGS_OK)
+        return false;
 
     return true;
 }
@@ -133,12 +142,23 @@ bool ausf_nausf_auth_handle_authenticate_delete(ausf_ue_t *ausf_ue,
     ogs_assert(stream);
     ogs_assert(recvmsg);
 
+    if (!ausf_ue->auth_event.resource_uri) {
+        ogs_error("[%s] No authentication event", ausf_ue->supi);
+        ogs_assert(true ==
+            ogs_sbi_server_send_error(
+                stream, OGS_SBI_HTTP_STATUS_NOT_FOUND,
+                recvmsg, "Authentication event not found",
+                ausf_ue->supi, NULL));
+        return true;
+    }
+
     r = ausf_sbi_discover_and_send(
             OpenAPI_service_name_nudm_ueau, NULL,
             ausf_nudm_ueau_build_auth_removal_ind,
             ausf_ue, stream, NULL);
     ogs_expect(r == OGS_OK);
-    ogs_assert(r != OGS_ERROR);
+    if (r != OGS_OK)
+        return false;
 
     return true;
 }

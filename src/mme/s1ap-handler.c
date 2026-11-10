@@ -270,7 +270,17 @@ void s1ap_handle_s1_setup_request(mme_enb_t *enb, ogs_s1ap_message_t *message)
         return;
     }
 
-    ogs_s1ap_ENB_ID_to_uint32(Global_ENB_ID->eNB_ID, &enb_id);
+    if (ogs_s1ap_ENB_ID_to_uint32(
+                Global_ENB_ID->eNB_ID, &enb_id) != OGS_OK) {
+        ogs_error("Invalid or unsupported Global_ENB_ID->eNB_ID");
+        group = S1AP_Cause_PR_protocol;
+        cause = S1AP_CauseProtocol_semantic_error;
+
+        r = s1ap_send_s1_setup_failure(enb, group, cause);
+        ogs_expect(r == OGS_OK);
+        ogs_assert(r != OGS_ERROR);
+        return;
+    }
     ogs_debug("    IP[%s] ENB_ID[%d]", OGS_ADDR(enb->sctp.addr, buf), enb_id);
 
     mme_enb_set_enb_id(enb, enb_id);
@@ -850,6 +860,17 @@ void s1ap_handle_initial_ue_message(mme_enb_t *enb, ogs_s1ap_message_t *message)
     }
 
     if (mme_ue_from_stmsi) {
+        if (mme_ue_from_stmsi->attach_session_delete_pending) {
+            /* Keep the authenticated Attach's serving S1 association. */
+            if (enb_ue_new) {
+                r = s1ap_send_ue_context_release_command(enb_ue,
+                        S1AP_Cause_PR_nas, S1AP_CauseNas_normal_release,
+                        S1AP_UE_CTX_REL_S1_CONTEXT_REMOVE, 0);
+                ogs_expect(r == OGS_OK);
+                ogs_assert(r != OGS_ERROR);
+            }
+            return;
+        }
         /* If NAS(mme_ue_t) has already been associated with
          * older S1(enb_ue_t) context */
         if (ECM_CONNECTED(mme_ue_from_stmsi)) {
@@ -1194,7 +1215,16 @@ void s1ap_handle_ue_capability_info_indication(
 
     mme_ue = mme_ue_find_by_id(enb_ue->mme_ue_id);
     if (mme_ue) {
-        ogs_assert(UERadioCapability);
+        /*
+         * TS 36.413 9.1.10: UE Radio Capability is mandatory but its
+         * Assigned Criticality is "ignore".  10.3.5 says a missing IE of
+         * that criticality is ignored and the procedure continues, so the
+         * indication is dropped without an ERROR INDICATION.
+         */
+        if (!UERadioCapability) {
+            ogs_error("No UERadioCapability IE; ignoring the indication");
+            return;
+        }
         OGS_ASN_STORE_DATA(&mme_ue->ueRadioCapability, UERadioCapability);
     }
 }
@@ -3039,6 +3069,26 @@ void s1ap_handle_path_switch_request(
     mme_ue = mme_ue_find_by_id(enb_ue->mme_ue_id);
     if (!mme_ue) {
         ogs_error("No UE(mme-ue) context");
+        r = s1ap_send_path_switch_failure(
+                enb, *ENB_UE_S1AP_ID, *MME_UE_S1AP_ID,
+                S1AP_Cause_PR_radioNetwork,
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        ogs_expect(r == OGS_OK);
+        return;
+    }
+
+    /*
+     * An S1 handover leg can still reference the MME UE after the
+     * active S1 connection has been released or moved to another leg.
+     */
+    if (mme_ue->enb_ue_id != enb_ue->id) {
+        ogs_error("Inactive S1 context for path switch "
+                "[MME_UE_S1AP_ID:%lld]", (long long)*MME_UE_S1AP_ID);
+        r = s1ap_send_path_switch_failure(
+                enb, *ENB_UE_S1AP_ID, *MME_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol,
+                S1AP_CauseProtocol_message_not_compatible_with_receiver_state);
+        ogs_expect(r == OGS_OK);
         return;
     }
 
@@ -3405,10 +3455,19 @@ void s1ap_handle_enb_configuration_transfer(
             return;
         }
 
-        ogs_s1ap_ENB_ID_to_uint32(
-                sourceeNB_ID->global_ENB_ID->eNB_ID, &source_enb_id);
-        ogs_s1ap_ENB_ID_to_uint32(
-                targeteNB_ID->global_ENB_ID->eNB_ID, &target_enb_id);
+        if (ogs_s1ap_ENB_ID_to_uint32(
+                    sourceeNB_ID->global_ENB_ID->eNB_ID,
+                    &source_enb_id) != OGS_OK ||
+                ogs_s1ap_ENB_ID_to_uint32(
+                    targeteNB_ID->global_ENB_ID->eNB_ID,
+                    &target_enb_id) != OGS_OK) {
+            ogs_error("Invalid or unsupported SONConfigurationTransfer eNB-ID");
+            r = s1ap_send_error_indication(enb, NULL, NULL,
+                    S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+            ogs_expect(r == OGS_OK);
+            ogs_assert(r != OGS_ERROR);
+            return;
+        }
 
         if (sourceeNB_ID->selected_TAI->tAC.size != sizeof(source_tac)) {
             ogs_error("Invalid sourceeNB_ID->selected_TAI->tAC.size = %d "
@@ -3490,9 +3549,16 @@ static void s1ap_handle_handover_required_intralte(enb_ue_t *source_ue,
 
     switch (TargetID->present) {
     case S1AP_TargetID_PR_targeteNB_ID:
-        ogs_s1ap_ENB_ID_to_uint32(
-            TargetID->choice.targeteNB_ID->global_ENB_ID->eNB_ID,
-            &target_enb_id);
+        if (ogs_s1ap_ENB_ID_to_uint32(
+                    TargetID->choice.targeteNB_ID->global_ENB_ID->eNB_ID,
+                    &target_enb_id) != OGS_OK) {
+            ogs_error("Invalid or unsupported target eNB-ID");
+            r = s1ap_send_handover_preparation_failure(source_ue,
+                    S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+            ogs_expect(r == OGS_OK);
+            ogs_assert(r != OGS_ERROR);
+            return;
+        }
         break;
     default:
         ogs_error("Not implemented(%d)", TargetID->present);
@@ -3556,8 +3622,22 @@ static void s1ap_handle_handover_required_intralte(enb_ue_t *source_ue,
     r = s1ap_send_handover_request(
             source_ue, target_enb, &source_ue->handover_type, Cause,
             Source_ToTarget_TransparentContainer);
+    if (r == OGS_ERROR) {
+        /*
+         * HANDOVER REQUEST could not be built or sent to the target eNB,
+         * e.g. a valid, opaque Source-ToTarget-TransparentContainer does
+         * not fit in the local 32 KiB S1AP encode buffer.  Fail the
+         * preparation towards the source with a target-side cause
+         * instead of aborting the MME.
+         */
+        ogs_error("s1ap_send_handover_request() failed");
+        r = s1ap_send_handover_preparation_failure(source_ue,
+            S1AP_Cause_PR_radioNetwork,
+            S1AP_CauseRadioNetwork_ho_failure_in_target_EPC_eNB_or_target_system);
+        ogs_expect(r == OGS_OK);
+        return;
+    }
     ogs_expect(r == OGS_OK);
-    ogs_assert(r != OGS_ERROR);
 }
 
 void s1ap_handle_handover_required(mme_enb_t *enb, ogs_s1ap_message_t *message)
