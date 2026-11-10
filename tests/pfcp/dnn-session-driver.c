@@ -201,7 +201,8 @@ int main(int argc, const char *const argv[])
             printf("RESULT {\"rs\":%u,\"ue_ipv6\":\"%s\"}\n", psi, ip6);
             continue;
         }
-        if (!strcmp(command, "ping") || !strcmp(command, "probe")) {
+        if (!strcmp(command, "ping") || !strcmp(command, "probe") ||
+                !strcmp(command, "absent")) {
             ogs_gtp2_header_desc_t header;
             int offset;
             uint8_t *inner;
@@ -216,6 +217,25 @@ int main(int argc, const char *const argv[])
                 struct pollfd pollfd = {gtpu->sock->fd, POLLIN, 0};
                 ogs_assert(poll(&pollfd, 1, 1500) == 0);
                 printf("RESULT {\"probe\":%u,\"received\":false}\n", psi);
+                continue;
+            }
+            if (!strcmp(command, "absent")) {
+                struct pollfd pollfd = {gtpu->sock->fd, POLLIN, 0};
+                int received = poll(&pollfd, 1, 1500);
+                ogs_assert(received >= 0);
+                if (received == 0) {
+                    printf("RESULT {\"absent\":%u,\"received\":false}\n", psi);
+                    continue;
+                }
+                /* A deleted TEID may elicit Error Indication, never data. */
+                recvbuf = test_gtpu_read(gtpu);
+                ogs_assert(recvbuf);
+                offset = ogs_gtpu_parse_header(&header, recvbuf);
+                ogs_assert(offset >= OGS_GTPV1U_HEADER_LEN);
+                ogs_assert(header.type == OGS_GTPU_MSGTYPE_ERR_IND);
+                printf("RESULT {\"absent\":%u,\"received\":true,"
+                        "\"gtp_type\":%u}\n", psi, header.type);
+                ogs_pkbuf_free(recvbuf);
                 continue;
             }
             recvbuf = testgnb_gtpu_read(gtpu);

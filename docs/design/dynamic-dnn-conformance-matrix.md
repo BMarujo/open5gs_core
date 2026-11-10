@@ -1,5 +1,20 @@
 # Scoped clause → behavior → test → evidence matrix
 
+## Official upstream integration — 2026-11-10
+
+The fork now includes official upstream `5cb35ead227d25a5ed2161d66faade56a9fd12db`
+(157 commits since the feature's upstream base). Open5GS still declares 2.8.0.
+See [the merge report](dynamic-dnn-upstream-merge.md) for executed tests and
+image/deployment status. Historical reports keep their original source identity.
+
+**Recovery update:** upstream now deletes the affected UPF sessions when that
+UPF declares its SMF unreachable after heartbeat expiry. Retention is acknowledged
+only while the UPF still has an existing association/session context. Old sessions
+on that failed association cannot be assumed to survive. Accepted reassociation
+still relearns DNNs and restores eligibility for new sessions. Sessions on other
+UPFs are checked separately. No migration or strict selection is introduced.
+
+
 Final review: 2026-11-08. This matrix supersedes the ADR's original planned
 evidence column. It distinguishes a specified requirement from this fork's
 implementation policy. A passing row describes the named tests, not complete

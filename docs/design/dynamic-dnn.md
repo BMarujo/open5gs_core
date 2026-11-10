@@ -1,5 +1,20 @@
 # Dynamic DNN learning with the existing SMF selector
 
+## Official upstream integration — 2026-11-10
+
+The fork now includes official upstream `5cb35ead227d25a5ed2161d66faade56a9fd12db`
+(157 commits since the feature's upstream base). Open5GS still declares 2.8.0.
+See [the merge report](dynamic-dnn-upstream-merge.md) for executed tests and
+image/deployment status. Historical reports keep their original source identity.
+
+**Recovery update:** upstream now deletes the affected UPF sessions when that
+UPF declares its SMF unreachable after heartbeat expiry. Retention is acknowledged
+only while the UPF still has an existing association/session context. Old sessions
+on that failed association cannot be assumed to survive. Accepted reassociation
+still relearns DNNs and restores eligibility for new sessions. Sessions on other
+UPFs are checked separately. No migration or strict selection is introduced.
+
+
 The [single-UE unshaped TCP follow-up](dynamic-dnn-singleue.md) records fresh
 original/new rates and ranges. Its paired equivalence screen is INCONCLUSIVE
 because of measured variability; protocol/QoS and TC restoration checks pass.

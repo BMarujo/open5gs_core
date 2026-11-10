@@ -11,7 +11,7 @@ WORKDIR /src
 RUN meson setup /build --prefix=/opt/open5gs --buildtype=debugoptimized \
         -Dwerror=false --wrap-mode=nodownload \
     && ninja -C /build -j4 \
-    && meson test -C /build core crypt unit smf-selection --print-errorlogs \
+    && meson test -C /build core crypt unit smf-selection eir-fsm --print-errorlogs \
     && DESTDIR=/runtime meson install -C /build --no-rebuild
 
 FROM ${RUNTIME_IMAGE} AS runtime
@@ -38,9 +38,9 @@ RUN groupadd --system --gid 999 open5gs \
     && useradd --system --uid 999 --gid 999 --home-dir /opt/open5gs open5gs \
     && chown -R 999:999 /opt/open5gs \
     && chmod 0755 /usr/local/bin/open5gs-entrypoint \
-    && for nf in amf smf upf nrf scp ausf udm udr pcf nssf bsf; do \
-         ldd /opt/open5gs/bin/open5gs-${nf}d > /tmp/ldd-${nf}; \
-         if grep -q 'not found' /tmp/ldd-${nf}; then cat /tmp/ldd-${nf}; exit 1; fi; \
+    && for binary in /opt/open5gs/bin/open5gs-*d; do \
+         ldd "${binary}" > /tmp/ldd-nf; \
+         if grep -q 'not found' /tmp/ldd-nf; then cat /tmp/ldd-nf; exit 1; fi; \
        done
 USER 999:999
 # The Gradiant UPF chart supplies privileges and creates its TUN/NAT in an init

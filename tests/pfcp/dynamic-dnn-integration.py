@@ -28,6 +28,9 @@ assert MODE in ('dynamic', 'static', 'incompatible', 'recovery', 'recovery-cp',
 NETWORK_FAILURE = MODE.startswith('asymmetric-')
 RECOVERY = MODE in ('recovery', 'recovery-cp') or NETWORK_FAILURE
 CP_INITIATOR = MODE in ('recovery-cp', 'asymmetric-upf')
+if 'DNN_ASSOCIATION_INITIATOR' in os.environ:
+    assert os.environ['DNN_ASSOCIATION_INITIATOR'] in ('up', 'cp')
+    CP_INITIATOR = os.environ['DNN_ASSOCIATION_INITIATOR'] == 'cp'
 OUT.mkdir(parents=True, exist_ok=NETWORK_FAILURE)  # Network wrapper owns fresh output.
 base = yaml.safe_load((BUILD / 'configs/slice.yaml').read_text())
 base['global'] = {'max': {'ue': 16, 'peer': 16}}
@@ -200,6 +203,15 @@ class UE:
         ping['end'] = time.time()
         record.setdefault('pings', []).append(ping)
 
+    def removed(self, record):
+        """After an actual timeout, an old TEID must not forward user data."""
+        host_route(record['ue_ip'], 'poolc')
+        probe = {'start': time.time()}
+        probe.update(self.command(f'absent {record["psi"]} 10.48.0.1'))
+        probe['end'] = time.time()
+        assert probe['absent'] == record['psi'], probe
+        record.setdefault('removal_probes', []).append(probe)
+
 
 def decode_evidence():
     # UDP payload is decoded independently of the encoder. tshark also saves
@@ -341,6 +353,15 @@ try:
             fault('drop_with_setup')
             wait_for(lambda: 'PFCP de-associated' in target.text()[offsets['upf' if direction=='upf' else 'smf']:],30)
             ue.ping(internet); ue.ping(edge_b)
+            if old_c:
+                # Upstream 926550203 / TS 23.527 4.4.3.1: expiry purges
+                # this SMF's UPF sessions. Reassociation is not old-session
+                # survival, even with an unchanged Recovery Time Stamp.
+                wait_for(lambda: any('DELETION:' in line and
+                    'IPv4['+old_c['ue_ip']+']' in line
+                    for line in c.text()[offsets['upf']:].splitlines()), 10)
+                ue.removed(old_c)
+                checks['upf-heartbeat-expiry-removes-old-session'] = 'PASS'
             if direction == 'smf':
                 # C has no session to release. Controlled cursor and blocked
                 # Setup replies demonstrate exclusion while locally unassociated.
@@ -350,7 +371,7 @@ try:
             wait_for(lambda: c.text().rfind('PFCP associated')>c.text().rfind('PFCP de-associated'),30)
             confirmed = 'PFCP learned pools heartbeat confirmed peer[127.0.0.9] generation['
             wait_for(lambda: confirmed in smf.text()[offsets['smf']:],30)
-            if old_c: ue.ping(old_c)
+            if old_c: ue.removed(old_c)
             expected = ['127.0.0.8','127.0.0.9']*2 if old_c else ['127.0.0.9','127.0.0.8']*2
             returned=[]
             for psi, ip in zip([4,5,7,8],expected):

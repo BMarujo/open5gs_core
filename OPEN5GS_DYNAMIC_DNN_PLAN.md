@@ -1,5 +1,19 @@
 # Open5GS: descoberta dinâmica de DNNs das UPFs
 
+## Follow-up — integração do upstream oficial, 10 de novembro de 2026
+
+Merge do upstream `5cb35ead227d25a5ed2161d66faade56a9fd12db`, mantendo o MVP
+4A e a versão declarada 2.8.0. Compilação completa, cinco suites unitárias,
+ASan/UBSan sem supressões, regeneração do codec, NAS/EPC, recuperação assimétrica
+e IPv6/slices passaram localmente. Um teste antigo falhou porque esperava que a
+sessão sobrevivesse ao timeout na UPF; o upstream passou a apagá-la. O teste foi
+adaptado para verificar remoção, reaprendizagem e novas sessões, sem remover a
+correção upstream. Etapa 4B permanece excluída.
+
+[Relatório e estado de publicação/rollout](docs/design/dynamic-dnn-upstream-merge.md).
+As entradas históricas abaixo mantêm a identidade e limites dos respetivos testes.
+
+
 Plano de desenvolvimento e prompts sequenciais para Codex no VS Code.
 
 Preparado em 5 de outubro de 2026; atualizado após as etapas autorizadas abaixo.

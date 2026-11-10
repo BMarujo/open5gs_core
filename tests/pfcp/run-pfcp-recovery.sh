@@ -34,7 +34,8 @@ for _ in {1..100}; do
 done
 [[ -S $artifacts/$name/control.sock ]]
 if [[ $scenario == nas ]]; then
-    [[ $initiator == up && $direction != upf || $initiator == cp && $direction == upf ]]
+    [[ $initiator == up || $initiator == cp ]]
+    [[ $direction == smf || $direction == upf || $direction == both ]]
     mongo=$(docker run -d --network "container:$lab" --tmpfs /data/db \
         --label open5gs.dynamic-dnn.lab=true \
         mongo@sha256:8c3ce64d1a433bf57ea79035b48a38ea3e532997a1328fe3266e2e2e8bfb41b6 \
@@ -46,7 +47,8 @@ for _ in range(100):
   with socket.create_connection(("127.0.0.1",27017),.2): break
  except OSError: time.sleep(.1)
 else: raise SystemExit("MongoDB not ready")'
-    docker exec "$lab" python3 /artifacts/source/tests/pfcp/dynamic-dnn-integration.py \
+    docker exec "$lab" env "DNN_ASSOCIATION_INITIATOR=$initiator" \
+        python3 /artifacts/source/tests/pfcp/dynamic-dnn-integration.py \
         /artifacts/build "/artifacts/$name" "asymmetric-$direction"
 else
     [[ $scenario == pair ]]
